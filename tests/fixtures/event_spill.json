@@ -1,0 +1,9 @@
+{
+  "type": "NEWS",
+  "title": "Hydrochloric acid spill at Avon chemical plant",
+  "body": "A spill involving an estimated 5,000 gallons of 37% hydrochloric acid occurred at a manufacturing facility in Avon, Indiana. Operations may be disrupted.",
+  "source": "LocalNewsNow",
+  "event_type": "SAFETY_AND_OPERATIONS",
+  "severity_guess": 2
+}
+

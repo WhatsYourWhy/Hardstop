@@ -101,3 +101,17 @@ pip install -r requirements.txt
 python -m sentinel.runners.run_demo
 
 ```
+
+## Usage
+
+### Running the Demo Pipeline
+
+The demo pipeline (`python -m sentinel.runners.run_demo`) demonstrates the core Sentinel workflow:
+
+1. Loads a sample JSON event from `tests/fixtures/event_spill.json`
+2. Normalizes the event into a canonical format
+3. Attaches dummy entity associations (facilities, shipments)
+4. Builds a basic risk alert using heuristics
+5. Outputs the alert as formatted JSON
+
+The demo provides a quick way to verify the installation and see the end-to-end flow from event ingestion to alert generation.
