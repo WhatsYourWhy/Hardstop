@@ -20,7 +20,7 @@ def build_basic_alert(event: Dict) -> SentinelAlert:
 
     summary = event.get("title", "Risk event detected")
     risk_type = event.get("event_type", "GENERAL")
-    priority = event.get("severity_guess", 1) or 1
+    priority = event.get("severity_guess", 1)
 
     scope = AlertScope(
         facilities=event.get("facilities", []),
