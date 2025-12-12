@@ -1,0 +1,14 @@
+lane_id,origin_facility_id,dest_facility_id,mode,carrier_name,avg_transit_days,volume_score
+LANE-001,PLANT-01,DC-01,TRUCK,FreightCo Logistics,2.5,8
+LANE-002,PLANT-01,DC-02,TRUCK,Regional Transport,3.0,7
+LANE-003,PLANT-01,PLANT-02,TRUCK,Local Freight,0.5,6
+LANE-004,PLANT-02,DC-01,TRUCK,FreightCo Logistics,2.0,7
+LANE-005,PLANT-02,DC-02,TRUCK,Regional Transport,2.5,8
+LANE-006,PLANT-03,DC-01,RAIL,National Rail,4.0,9
+LANE-007,PLANT-03,DC-03,RAIL,National Rail,5.0,8
+LANE-008,PLANT-04,DC-01,TRUCK,Southwest Freight,3.5,7
+LANE-009,PLANT-04,DC-02,TRUCK,Regional Transport,4.0,8
+LANE-010,DC-01,DC-02,TRUCK,Inter-DC Transport,1.5,6
+LANE-011,DC-01,DC-03,RAIL,National Rail,4.5,7
+LANE-012,DC-02,DC-03,RAIL,National Rail,5.5,6
+

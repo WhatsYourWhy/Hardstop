@@ -1,0 +1,9 @@
+facility_id,name,type,city,state,country,lat,lon,criticality_score
+PLANT-01,Avon Chemical Manufacturing,PLANT,Avon,Indiana,USA,39.7606,-86.3956,8
+PLANT-02,Indianapolis Distribution Center,DC,Indianapolis,Indiana,USA,39.7684,-86.1581,6
+PLANT-03,Chicago Production Facility,PLANT,Chicago,Illinois,USA,41.8781,-87.6298,9
+DC-01,Memphis Logistics Hub,DC,Memphis,Tennessee,USA,35.1495,-90.0490,7
+DC-02,Atlanta Regional Warehouse,DC,Atlanta,Georgia,USA,33.7490,-84.3880,5
+PLANT-04,Houston Refinery,PLANT,Houston,Texas,USA,29.7604,-95.3698,9
+DC-03,Los Angeles Distribution,DC,Los Angeles,California,USA,34.0522,-118.2437,6
+
