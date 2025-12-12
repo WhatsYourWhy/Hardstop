@@ -87,31 +87,57 @@ sentinel-agent/
 ## Quickstart
 
 ```bash
-
 # create venv and install
-
 python -m venv .venv
 
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+# Activate virtual environment
+# On Linux/Mac:
+source .venv/bin/activate
 
-pip install -r requirements.txt
+# On Windows (PowerShell):
+.\.venv\Scripts\Activate.ps1
+
+pip install -e .
 
 # run demo pipeline
-
-python -m sentinel.runners.run_demo
-
+sentinel demo
 ```
 
 ## Usage
 
+### CLI Commands
+
+Sentinel provides a simple CLI interface:
+
+```bash
+# Run the demo pipeline
+sentinel demo
+
+# Load network data from CSV files
+sentinel ingest
+
+# Generate daily brief (coming soon)
+sentinel brief --today
+```
+
 ### Running the Demo Pipeline
 
-The demo pipeline (`python -m sentinel.runners.run_demo`) demonstrates the core Sentinel workflow:
+The demo pipeline (`sentinel demo`) demonstrates the core Sentinel workflow:
 
 1. Loads a sample JSON event from `tests/fixtures/event_spill.json`
 2. Normalizes the event into a canonical format
-3. Attaches dummy entity associations (facilities, shipments)
+3. Links the event to network data (facilities, lanes, shipments) from the database
 4. Builds a basic risk alert using heuristics
 5. Outputs the alert as formatted JSON
 
 The demo provides a quick way to verify the installation and see the end-to-end flow from event ingestion to alert generation.
+
+### Loading Network Data
+
+Before running the demo, load your network data:
+
+```bash
+sentinel ingest
+```
+
+This reads CSV files from `tests/fixtures/` (or paths specified in `sentinel.config.yaml`) and loads them into SQLite. The demo will then use this real network data to link events to facilities and shipments.
