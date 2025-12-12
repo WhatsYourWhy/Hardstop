@@ -95,9 +95,14 @@ python -m venv .venv
 source .venv/bin/activate
 
 # On Windows (PowerShell):
+# If you get an execution policy error, run this first:
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 
 pip install -e .
+
+# For contributors (includes pytest and other dev tools):
+pip install -e ".[dev]"
 
 # run demo pipeline
 sentinel demo
