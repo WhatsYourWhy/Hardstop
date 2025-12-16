@@ -17,6 +17,6 @@ def test_demo_pipeline():
     alert = build_basic_alert(event)
     assert alert.alert_id.startswith("ALERT-")
     assert alert.root_event_id == "EVT-TEST-0001"
-    assert alert.priority in (1, 2)
+    assert alert.classification in (0, 1, 2)
     assert alert.scope.facilities
 

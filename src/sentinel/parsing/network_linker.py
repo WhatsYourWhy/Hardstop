@@ -29,7 +29,9 @@ def _normalize_state(s: str) -> str:
 
 def _extract_city_state(text: str) -> Optional[Tuple[str, str]]:
     # matches "Avon, IN" or "Avon, Indiana"
-    m = re.search(r"\b([A-Z][a-zA-Z.\- ]+?),\s*([A-Za-z]{2}|[A-Za-z ]{3,})\b", text)
+    # More restrictive: city must be a single word or hyphenated word before comma
+    # This avoids matching "facility in Avon" as the city
+    m = re.search(r"\b([A-Z][a-z]+(?:-[A-Z][a-z]+)?),\s*([A-Za-z]{2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", text)
     if not m:
         return None
     city = m.group(1).strip().strip(".")
@@ -51,6 +53,7 @@ def link_event_to_network(event: Dict, session: Session, max_shipments: int = 50
     event.setdefault("linking_notes", [])
     event.setdefault("link_confidence", {})
     event.setdefault("link_provenance", {})
+    event.setdefault("facility_candidates", [])
 
     facility_confidence = 0.0
     facility_provenance = None
@@ -105,11 +108,55 @@ def link_event_to_network(event: Dict, session: Session, max_shipments: int = 50
                 .all()
             )
             if hits:
-                ids = [h.facility_id for h in hits]
-                event["facilities"] = sorted(set(event["facilities"] + ids))
-                facility_confidence = 0.70
-                facility_provenance = "CITY_STATE"
-                event["linking_notes"].append(f"Facility match by city/state: {city}, {state} -> {ids}")
+                # Store all candidates
+                event["facility_candidates"] = [h.facility_id for h in hits]
+                
+                # Tie-breaker logic for ambiguous matches
+                if len(hits) > 1:
+                    # Sort by: criticality_score (desc), then type priority (PLANT > DC > PORT)
+                    def facility_sort_key(f):
+                        criticality = f.criticality_score or 0
+                        # Type priority: PLANT=3, DC=2, PORT=1, other=0
+                        type_priority = {"PLANT": 3, "DC": 2, "PORT": 1}.get(f.type.upper() if f.type else "", 0)
+                        return (-criticality, -type_priority)
+                    
+                    sorted_hits = sorted(hits, key=facility_sort_key)
+                    top_facility = sorted_hits[0]
+                    
+                    # Check if we have a second signal (facility_id or name in text)
+                    has_second_signal = False
+                    text_l = text.lower()
+                    for f in hits:
+                        if f.facility_id in text or (f.name and f.name.lower() in text_l):
+                            has_second_signal = True
+                            top_facility = f  # Use the one with second signal
+                            break
+                    
+                    if not has_second_signal:
+                        # Ambiguous match - lower confidence and don't link shipments yet
+                        facility_confidence = 0.45
+                        facility_provenance = "CITY_STATE_AMBIGUOUS"
+                        event["linking_notes"].append(
+                            f"Ambiguous city/state match: {city}, {state} -> {len(hits)} facilities. "
+                            f"Selected {top_facility.facility_id} (highest criticality/type). "
+                            f"Confidence lowered due to ambiguity."
+                        )
+                    else:
+                        facility_confidence = 0.70
+                        facility_provenance = "CITY_STATE_WITH_SIGNAL"
+                        event["linking_notes"].append(
+                            f"Facility match by city/state with second signal: {city}, {state} -> {top_facility.facility_id}"
+                        )
+                    
+                    # Only link the top facility
+                    event["facilities"] = sorted(set(event["facilities"] + [top_facility.facility_id]))
+                else:
+                    # Single match - unambiguous
+                    ids = [h.facility_id for h in hits]
+                    event["facilities"] = sorted(set(event["facilities"] + ids))
+                    facility_confidence = 0.70
+                    facility_provenance = "CITY_STATE"
+                    event["linking_notes"].append(f"Facility match by city/state: {city}, {state} -> {ids}")
             else:
                 event["linking_notes"].append(f"No facility match for city/state: {city}, {state}")
 

@@ -5,11 +5,12 @@ from sqlalchemy.orm import Session
 from ..utils.id_generator import new_alert_id
 from .alert_models import (
     AlertAction,
+    AlertDiagnostics,
     AlertImpactAssessment,
     AlertScope,
     SentinelAlert,
 )
-from .impact_scorer import calculate_network_impact_score, map_score_to_priority
+from .impact_scorer import calculate_network_impact_score, map_score_to_classification
 
 
 def build_basic_alert(event: Dict, session: Optional[Session] = None) -> SentinelAlert:
@@ -30,15 +31,26 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
     summary = event.get("title", "Risk event detected")
     risk_type = event.get("event_type", "GENERAL")
     
-    # Calculate priority based on network impact
+    # Calculate classification based on network impact
+    diagnostics = None
     if session:
-        impact_score = calculate_network_impact_score(event, session)
-        priority = map_score_to_priority(impact_score)
-        priority_source = f"network_impact_score={impact_score}"
+        impact_score, breakdown = calculate_network_impact_score(event, session)
+        classification = map_score_to_classification(impact_score)
+        classification_source = f"network_impact_score={impact_score}"
+        
+        # Build diagnostics object
+        diagnostics = AlertDiagnostics(
+            link_confidence=event.get("link_confidence", {}),
+            link_provenance=event.get("link_provenance", {}),
+            shipments_total_linked=event.get("shipments_total_linked", len(event.get("shipments", []))),
+            shipments_truncated=event.get("shipments_truncated", False),
+            impact_score=impact_score,
+            impact_score_breakdown=breakdown,
+        )
     else:
         # Fallback to severity_guess if no session provided
-        priority = event.get("severity_guess", 1)
-        priority_source = "severity_guess (no network data)"
+        classification = event.get("severity_guess", 1)
+        classification_source = "severity_guess (no network data)"
 
     scope = AlertScope(
         facilities=event.get("facilities", []),
@@ -52,7 +64,7 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
 
     reasoning = [
         f"Event type: {risk_type}",
-        f"Priority: {priority} (from {priority_source})",
+        f"Classification: {classification} (from {classification_source})",
         "Scope derived from network entity matching.",
     ]
 
@@ -68,7 +80,7 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
     return SentinelAlert(
         alert_id=alert_id,
         risk_type=risk_type,
-        priority=priority,
+        classification=classification,
         status="OPEN",
         summary=summary,
         root_event_id=root_event_id,
@@ -77,5 +89,6 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
         reasoning=reasoning,
         recommended_actions=recommended_actions,
         confidence_score=0.5,
+        diagnostics=diagnostics,
     )
 
