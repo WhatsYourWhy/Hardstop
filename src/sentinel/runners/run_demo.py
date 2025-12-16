@@ -4,7 +4,7 @@ from pathlib import Path
 from sentinel.alerts.alert_builder import build_basic_alert
 from sentinel.config.loader import load_config
 from sentinel.database.sqlite_client import get_session
-from sentinel.parsing.entity_extractor import link_to_network
+from sentinel.parsing.network_linker import link_event_to_network
 from sentinel.parsing.normalizer import normalize_event
 from sentinel.utils.logging import get_logger
 
@@ -34,11 +34,11 @@ def main() -> None:
 
     event = normalize_event(raw)
     
-    # Link to network data instead of using dummy entities
+    # Link to network data using new linker
     sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
     session = get_session(sqlite_path)
     try:
-        event = link_to_network(event, session)
+        event = link_event_to_network(event, session=session)
     finally:
         session.close()
 
@@ -46,6 +46,13 @@ def main() -> None:
 
     logger.info("Built alert:")
     print(alert.model_dump_json(indent=2))
+    
+    # Print linking notes for debugging
+    notes = event.get("linking_notes", [])
+    if notes:
+        logger.info("Linking notes:")
+        for n in notes:
+            logger.info(f"- {n}")
 
 
 if __name__ == "__main__":
