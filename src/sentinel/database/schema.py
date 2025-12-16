@@ -84,6 +84,7 @@ class Alert(Base):
     
     # Correlation fields (v0.4)
     correlation_key = Column(String, nullable=True, index=True)
+    correlation_action = Column(String, nullable=True)  # "CREATED" or "UPDATED" - fact about ingest time
     first_seen_utc = Column(DateTime, nullable=True)
     last_seen_utc = Column(DateTime, nullable=True)
     update_count = Column(Integer, nullable=True)

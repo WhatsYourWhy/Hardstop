@@ -30,6 +30,7 @@ def ensure_alert_correlation_columns(sqlite_path: str) -> None:
     try:
         additions: List[Tuple[str, str]] = [
             ("correlation_key", "TEXT"),
+            ("correlation_action", "TEXT"),  # v0.5: "CREATED" or "UPDATED"
             ("first_seen_utc", "TEXT"),  # SQLite stores datetime as TEXT
             ("last_seen_utc", "TEXT"),
             ("update_count", "INTEGER"),

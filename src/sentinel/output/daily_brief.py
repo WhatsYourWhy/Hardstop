@@ -22,7 +22,11 @@ def _parse_since(since_str: str) -> int:
 
 
 def _infer_correlation_action(alert: Alert) -> str:
-    """Infer correlation action from alert status."""
+    """Infer correlation action from alert status (fallback only).
+    
+    Prefer using alert.correlation_action if available, as it's a fact
+    about ingest time, not a lifecycle state.
+    """
     if alert.status == "UPDATED":
         return "UPDATED"
     else:
@@ -62,7 +66,7 @@ def _alert_to_dict(alert: Alert) -> Dict:
         "summary": alert.summary,
         "correlation": {
             "key": alert.correlation_key or "",
-            "action": _infer_correlation_action(alert),
+            "action": alert.correlation_action or _infer_correlation_action(alert),  # Prefer stored fact
             "alert_id": alert.alert_id,
         },
         "scope": scope,

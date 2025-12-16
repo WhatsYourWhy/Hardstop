@@ -80,6 +80,7 @@ def upsert_new_alert_row(
     recommended_actions: str | None,
     root_event_id: str,
     correlation_key: str,
+    correlation_action: str = "CREATED",
     impact_score: int | None = None,
     scope_json: str | None = None,
 ) -> Alert:
@@ -97,6 +98,7 @@ def upsert_new_alert_row(
         recommended_actions: Recommended actions text (can be None)
         root_event_id: Root event ID
         correlation_key: Correlation key
+        correlation_action: Correlation action ("CREATED" or "UPDATED")
         impact_score: Network impact score (0-10, optional)
         scope_json: Scope as JSON string (optional)
         
@@ -116,6 +118,7 @@ def upsert_new_alert_row(
         reasoning=reasoning,
         recommended_actions=recommended_actions,
         correlation_key=correlation_key,
+        correlation_action=correlation_action,
         first_seen_utc=now_iso,  # ISO string for consistent storage
         last_seen_utc=now_iso,   # ISO string for consistent storage
         update_count=0,
@@ -134,7 +137,9 @@ def update_existing_alert_row(
     new_summary: str,
     new_classification: int,
     root_event_id: str,
+    correlation_action: str = "UPDATED",
     impact_score: int | None = None,
+    scope_json: str | None = None,
 ) -> Alert:
     """
     Update an existing alert row with new information.
@@ -145,7 +150,9 @@ def update_existing_alert_row(
         new_summary: New summary text
         new_classification: New classification (takes max of old and new)
         root_event_id: New root event ID to add to list
+        correlation_action: Correlation action for this update (default "UPDATED")
         impact_score: New impact score (optional, updates if provided)
+        scope_json: Updated scope JSON (optional, updates if provided)
         
     Returns:
         Updated Alert row
@@ -156,11 +163,15 @@ def update_existing_alert_row(
     row.summary = new_summary
     row.classification = max(row.classification or 0, new_classification)
     row.status = "UPDATED"
+    row.correlation_action = correlation_action  # Store fact about this update
     row.last_seen_utc = now_iso  # ISO string for consistent storage
     row.update_count = (row.update_count or 0) + 1
     
     if impact_score is not None:
         row.impact_score = impact_score
+    
+    if scope_json is not None:
+        row.scope_json = scope_json  # Update scope with latest event data
 
     ids = load_root_event_ids(row)
     if root_event_id not in ids:

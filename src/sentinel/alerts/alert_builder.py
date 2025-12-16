@@ -124,7 +124,9 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                 new_summary=summary,
                 new_classification=classification,
                 root_event_id=root_event_id,
+                correlation_action="UPDATED",
                 impact_score=impact_score if session else None,
+                scope_json=scope_json,  # Update scope with latest event data
             )
             session.commit()
             
@@ -155,6 +157,7 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                 recommended_actions=actions_text,
                 root_event_id=root_event_id,
                 correlation_key=correlation_key,
+                correlation_action="CREATED",
                 impact_score=impact_score if session else None,
                 scope_json=scope_json,
             )
