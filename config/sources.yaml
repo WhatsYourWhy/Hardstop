@@ -1,0 +1,72 @@
+version: 1
+defaults:
+  enabled: true
+  max_items_per_fetch: 50
+  timeout_seconds: 20
+  user_agent: "sentinel-agent/0.6 (+https://github.com/WhatsYourWhy/sentinel-agent)"
+  rate_limit:
+    per_host_min_seconds: 2
+    jitter_seconds: 1
+  dedupe:
+    strategy: "canonical_id_or_hash"
+
+tiers:
+  global:
+    - id: nws_active_us
+      type: nws_alerts
+      enabled: true
+      tier: global
+      url: "https://api.weather.gov/alerts/active"
+      tags: ["weather", "disruption"]
+      geo:
+        country: "US"
+
+    - id: fema_ipaws_all_hazards
+      type: rss
+      enabled: true
+      tier: global
+      url: "https://www.fema.gov/api/open/v1/DisasterDeclarationsSummaries"
+      tags: ["disaster", "public-alerts"]
+      geo:
+        country: "US"
+
+    - id: fda_recalls
+      type: rss
+      enabled: true
+      tier: global
+      url: "https://www.fda.gov/feeds/cfsan/recalls.xml"
+      tags: ["recall", "food-safety", "supply-disruption"]
+      geo:
+        country: "US"
+
+  regional:
+    - id: nws_active_in
+      type: nws_alerts
+      enabled: true
+      tier: regional
+      url: "https://api.weather.gov/alerts/active?area=IN"
+      tags: ["weather", "indiana"]
+      geo:
+        country: "US"
+        state: "IN"
+
+    - id: nws_active_il
+      type: nws_alerts
+      enabled: true
+      tier: regional
+      url: "https://api.weather.gov/alerts/active?area=IL"
+      tags: ["weather", "illinois"]
+      geo:
+        country: "US"
+        state: "IL"
+
+  local:
+    - id: navcen_news_notices
+      type: rss
+      enabled: true
+      tier: local
+      url: "https://www.navcen.uscg.gov/news-and-notices"
+      tags: ["port", "maritime", "uscg"]
+      geo:
+        country: "US"
+

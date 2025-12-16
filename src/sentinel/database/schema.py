@@ -54,19 +54,42 @@ class Shipment(Base):
     priority_flag = Column(Integer)
 
 
+class RawItem(Base):
+    __tablename__ = "raw_items"
+
+    raw_id = Column(String, primary_key=True)
+    source_id = Column(String, nullable=False, index=True)
+    tier = Column(String, nullable=False)  # global, regional, local
+    fetched_at_utc = Column(String, nullable=False)  # ISO 8601 string
+    published_at_utc = Column(String, nullable=True)  # ISO 8601 string
+    canonical_id = Column(String, nullable=True, index=True)
+    url = Column(String, nullable=True)
+    title = Column(String, nullable=True)
+    raw_payload_json = Column(Text, nullable=False)  # Full original item as JSON
+    content_hash = Column(String, nullable=True, index=True)  # SHA256 hash
+    status = Column(String, nullable=False, default="NEW")  # NEW, NORMALIZED, FAILED
+    error = Column(Text, nullable=True)
+
+
 class Event(Base):
     __tablename__ = "events"
 
     event_id = Column(String, primary_key=True)
     source_type = Column(String, nullable=False)
     source_name = Column(String)
+    source_id = Column(String, nullable=True, index=True)  # v0.6: external source ID
+    raw_id = Column(String, nullable=True, index=True)  # v0.6: link to raw_items
     title = Column(String)
     raw_text = Column(Text)
     event_type = Column(String)
+    event_time_utc = Column(String, nullable=True)  # v0.6: ISO 8601 string
     severity_guess = Column(Integer)
     city = Column(String)
     state = Column(String)
     country = Column(String)
+    location_hint = Column(Text, nullable=True)  # v0.6: best-effort location text
+    entities_json = Column(Text, nullable=True)  # v0.6: extracted entities as JSON
+    event_payload_json = Column(Text, nullable=True)  # v0.6: normalized event as JSON
 
 
 class Alert(Base):

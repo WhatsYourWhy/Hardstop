@@ -2,8 +2,13 @@
 
 import argparse
 
-from sentinel.config.loader import load_config
-from sentinel.database.migrate import ensure_alert_correlation_columns
+from sentinel.config.loader import get_all_sources, load_config, load_sources_config
+from sentinel.database.migrate import (
+    ensure_alert_correlation_columns,
+    ensure_event_external_fields,
+    ensure_raw_items_table,
+)
+from sentinel.database.raw_item_repo import save_raw_item
 from sentinel.database.sqlite_client import session_context
 from sentinel.output.daily_brief import (
     _parse_since,
@@ -11,6 +16,8 @@ from sentinel.output.daily_brief import (
     render_json,
     render_markdown,
 )
+from sentinel.retrieval.fetcher import SourceFetcher
+from sentinel.runners.ingest_external import main as ingest_external_main
 from sentinel.runners.load_network import main as load_network_main
 from sentinel.runners.run_demo import main as run_demo_main
 from sentinel.utils.logging import get_logger
@@ -26,6 +33,205 @@ def cmd_demo(args: argparse.Namespace) -> None:
 def cmd_ingest(args: argparse.Namespace) -> None:
     """Load network data from CSV files."""
     load_network_main()
+
+
+def cmd_sources_list(args: argparse.Namespace) -> None:
+    """List configured sources."""
+    try:
+        sources_config = load_sources_config()
+        all_sources = get_all_sources(sources_config)
+        
+        if not all_sources:
+            print("No sources configured.")
+            return
+        
+        print(f"{'ID':<30} {'Tier':<12} {'Enabled':<10} {'Type':<15} {'Tags':<30}")
+        print("-" * 100)
+        
+        for source in all_sources:
+            source_id = source.get("id", "unknown")
+            tier = source.get("tier", "unknown")
+            enabled = "Yes" if source.get("enabled", True) else "No"
+            source_type = source.get("type", "unknown")
+            tags = ", ".join(source.get("tags", []))
+            
+            print(f"{source_id:<30} {tier:<12} {enabled:<10} {source_type:<15} {tags:<30}")
+    
+    except FileNotFoundError as e:
+        logger.error(f"Sources config not found: {e}")
+        print("Error: Sources config file not found. Create config/sources.yaml")
+    except Exception as e:
+        logger.error(f"Error listing sources: {e}", exc_info=True)
+        raise
+
+
+def cmd_fetch(args: argparse.Namespace) -> None:
+    """Fetch items from external sources."""
+    config = load_config()
+    sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    
+    # Ensure migrations
+    ensure_raw_items_table(sqlite_path)
+    ensure_event_external_fields(sqlite_path)
+    
+    # Create fetcher
+    fetcher = SourceFetcher()
+    
+    # Parse since argument
+    since_hours = None
+    if args.since:
+        since_str = args.since.lower().strip()
+        if since_str.endswith("h"):
+            since_hours = int(since_str[:-1])
+        elif since_str.endswith("d"):
+            since_hours = int(since_str[:-1]) * 24
+    
+    if args.dry_run:
+        print("DRY RUN: Would fetch from sources (no changes will be made)")
+        # Still load sources to show what would be fetched
+        sources_config = load_sources_config()
+        all_sources = get_all_sources(sources_config)
+        tier_filter = args.tier
+        enabled_only = args.enabled_only
+        
+        filtered = []
+        for source in all_sources:
+            if tier_filter and source.get("tier") != tier_filter:
+                continue
+            if enabled_only and not source.get("enabled", True):
+                continue
+            filtered.append(source)
+        
+        print(f"Would fetch from {len(filtered)} sources:")
+        for source in filtered:
+            print(f"  - {source['id']} ({source.get('tier', 'unknown')} tier)")
+        return
+    
+    # Fetch items
+    try:
+        results = fetcher.fetch_all(
+            tier=args.tier,
+            enabled_only=args.enabled_only,
+            max_items_per_source=args.max_items_per_source,
+            since=args.since,
+            fail_fast=args.fail_fast,
+        )
+        
+        # Save to database
+        total_fetched = 0
+        total_stored = 0
+        
+        with session_context(sqlite_path) as session:
+            for source_id, candidates in results.items():
+                # Get source config for tier
+                sources_config = load_sources_config()
+                all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
+                source_config = all_sources.get(source_id, {})
+                tier = source_config.get("tier", "unknown")
+                
+                for candidate in candidates:
+                    try:
+                        candidate_dict = candidate.model_dump() if hasattr(candidate, "model_dump") else candidate
+                        save_raw_item(
+                            session,
+                            source_id=source_id,
+                            tier=tier,
+                            candidate=candidate_dict,
+                        )
+                        total_stored += 1
+                    except Exception as e:
+                        logger.error(f"Failed to save raw item from {source_id}: {e}")
+                
+                total_fetched += len(candidates)
+                logger.info(f"Fetched {len(candidates)} items from {source_id}")
+            
+            session.commit()
+        
+        print(f"Fetch complete: {total_fetched} items fetched, {total_stored} stored")
+        
+    except Exception as e:
+        logger.error(f"Error fetching: {e}", exc_info=True)
+        raise
+
+
+def cmd_ingest_external(args: argparse.Namespace) -> None:
+    """Ingest external raw items into events and alerts."""
+    config = load_config()
+    sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    
+    # Ensure migrations
+    ensure_raw_items_table(sqlite_path)
+    ensure_event_external_fields(sqlite_path)
+    ensure_alert_correlation_columns(sqlite_path)
+    
+    # Parse min_tier
+    min_tier = args.min_tier
+    
+    # Parse since_hours if provided
+    since_hours = None
+    if args.since:
+        try:
+            since_hours = _parse_since(args.since)
+        except ValueError:
+            logger.warning(f"Invalid --since value: {args.since}, ignoring")
+    
+    try:
+        with session_context(sqlite_path) as session:
+            stats = ingest_external_main(
+                session=session,
+                limit=args.limit,
+                min_tier=min_tier,
+                source_id=args.source_id,
+                since_hours=since_hours,
+            )
+            
+            print(f"Ingestion complete:")
+            print(f"  Processed: {stats['processed']}")
+            print(f"  Events: {stats['events']}")
+            print(f"  Alerts: {stats['alerts']}")
+            print(f"  Errors: {stats['errors']}")
+    
+    except Exception as e:
+        logger.error(f"Error ingesting: {e}", exc_info=True)
+        raise
+
+
+def cmd_run(args: argparse.Namespace) -> None:
+    """Convenience command: fetch → ingest external → brief."""
+    since_str = args.since or "24h"
+    
+    # Step 1: Fetch
+    print("Step 1: Fetching from sources...")
+    fetch_args = argparse.Namespace(
+        tier=None,
+        enabled_only=True,
+        max_items_per_source=50,
+        since=since_str,
+        dry_run=False,
+        fail_fast=False,
+    )
+    cmd_fetch(fetch_args)
+    
+    # Step 2: Ingest external
+    print("\nStep 2: Ingesting external items...")
+    ingest_args = argparse.Namespace(
+        limit=200,
+        min_tier=None,
+        source_id=None,
+        since=since_str,
+    )
+    cmd_ingest_external(ingest_args)
+    
+    # Step 3: Brief
+    print("\nStep 3: Generating brief...")
+    brief_args = argparse.Namespace(
+        today=True,
+        since=since_str,
+        format="md",
+        limit=20,
+        include_class0=False,
+    )
+    cmd_brief(brief_args)
 
 
 def cmd_brief(args: argparse.Namespace) -> None:
@@ -93,6 +299,86 @@ def main() -> None:
         help="Use fixture files (default behavior)",
     )
     ingest_parser.set_defaults(func=cmd_ingest)
+    
+    # sources command
+    sources_parser = subparsers.add_parser("sources", help="Source management commands")
+    sources_subparsers = sources_parser.add_subparsers(dest="sources_subcommand", help="Sources subcommands", required=True)
+    sources_list_parser = sources_subparsers.add_parser("list", help="List configured sources")
+    sources_list_parser.set_defaults(func=cmd_sources_list)
+    
+    # fetch command
+    fetch_parser = subparsers.add_parser("fetch", help="Fetch items from external sources")
+    fetch_parser.add_argument(
+        "--tier",
+        type=str,
+        choices=["global", "regional", "local"],
+        help="Filter by tier (default: all)",
+    )
+    fetch_parser.add_argument(
+        "--enabled-only",
+        action="store_true",
+        default=True,
+        help="Only fetch from enabled sources (default: true)",
+    )
+    fetch_parser.add_argument(
+        "--max-items-per-source",
+        type=int,
+        default=50,
+        help="Maximum items per source (default: 50)",
+    )
+    fetch_parser.add_argument(
+        "--since",
+        type=str,
+        default="24h",
+        help="Time window: 24h, 72h, or 7d (default: 24h)",
+    )
+    fetch_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be fetched without making changes",
+    )
+    fetch_parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop on first error (default: continue on errors)",
+    )
+    fetch_parser.set_defaults(func=cmd_fetch)
+    
+    # ingest external command (separate from regular ingest)
+    ingest_external_parser = subparsers.add_parser("ingest-external", help="Ingest external raw items into events and alerts")
+    ingest_external_parser.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="Maximum number of raw items to process (default: 200)",
+    )
+    ingest_external_parser.add_argument(
+        "--min-tier",
+        type=str,
+        choices=["global", "regional", "local"],
+        help="Minimum tier (global > regional > local)",
+    )
+    ingest_external_parser.add_argument(
+        "--source-id",
+        type=str,
+        help="Filter by specific source ID",
+    )
+    ingest_external_parser.add_argument(
+        "--since",
+        type=str,
+        help="Only process items fetched within this time window (24h, 72h, 7d)",
+    )
+    ingest_external_parser.set_defaults(func=cmd_ingest_external)
+    
+    # run command
+    run_parser = subparsers.add_parser("run", help="Run full pipeline: fetch → ingest → brief")
+    run_parser.add_argument(
+        "--since",
+        type=str,
+        default="24h",
+        help="Time window: 24h, 72h, or 7d (default: 24h)",
+    )
+    run_parser.set_defaults(func=cmd_run)
     
     # brief command
     brief_parser = subparsers.add_parser("brief", help="Generate daily brief")
