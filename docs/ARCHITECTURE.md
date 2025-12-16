@@ -51,9 +51,11 @@ Event Input → Normalization → Entity Linking → Alert Generation → Output
   - `Facility`: Manufacturing plants, distribution centers
   - `Lane`: Shipping routes between facilities
   - `Shipment`: Active and upcoming shipments
-  - `Event`: Ingested events
-  - `Alert`: Generated risk alerts
+  - `Event`: Ingested events (schema exists, persistence planned)
+  - `Alert`: Generated risk alerts (with correlation and brief fields)
 - **`sqlite_client.py`**: Session management and engine creation
+- **`alert_repo.py`**: Repository functions for alert persistence and correlation queries
+- **`migrate.py`**: Additive migration helper for schema evolution
 
 **Key Design:**
 - Local-first: Single SQLite file (`sentinel.db`)
@@ -65,19 +67,73 @@ Event Input → Normalization → Entity Linking → Alert Generation → Output
 **Purpose:** Generate structured risk alerts from events.
 
 - **`alert_models.py`**: Pydantic models for `SentinelAlert`, `AlertScope`, `AlertImpactAssessment`, `AlertEvidence`
-- **`alert_builder.py`**: Heuristic-based alert generation (v1)
+- **`alert_builder.py`**: Heuristic-based alert generation
   - Maps network impact score to alert classification (0=Interesting, 1=Relevant, 2=Impactful)
   - Populates scope from linked entities
   - Generates recommended actions
   - Separates decisions (classification, summary, scope) from evidence (diagnostics, linking notes)
+  - Implements alert correlation logic to update existing alerts or create new ones based on a correlation key
+- **`impact_scorer.py`**: Calculates network impact score (0-10) based on facility criticality, lane volume, shipment priority, event type, and ETA proximity
+- **`correlation.py`**: Builds deterministic correlation keys for alert deduplication
 
 **Key Design:**
 - Structured output (JSON-serializable)
 - Clear decision/evidence boundary (decisions vs. what system believes)
 - Extensible for future LLM-based reasoning (LLM output goes in evidence, not decisions)
 - Deterministic classification based on network impact scoring
+- Supports alert correlation for deduplication and tracking evolving risks
 
-### 5. Runners (`sentinel/runners/`)
+### 5. Alert Correlation (`sentinel/alerts/correlation.py`)
+
+**Purpose:** Deduplicate and update alerts based on correlation keys.
+
+- **`correlation.py`**: Builds deterministic correlation keys from event type, facility, and lane
+- **Correlation Logic**:
+  - Key format: `BUCKET|FACILITY|LANE` (e.g., "SPILL|PLANT-01|LANE-001")
+  - 7-day lookback window for finding existing alerts
+  - Updates existing alerts instead of creating duplicates
+  - Tracks `correlation_action` ("CREATED" vs "UPDATED") as a fact about ingest time
+
+**Key Design:**
+- Deterministic key generation (same event type + facility + lane = same key)
+- Stores correlation metadata in database (key, action, timestamps)
+- Updates scope and impact_score when alert is correlated
+- Requires database session (correlation is a persistence feature)
+
+### 6. Daily Brief (`sentinel/output/daily_brief.py`)
+
+**Purpose:** Generate summaries of recent alerts for human consumption.
+
+- **Query Logic**:
+  - Finds alerts where `last_seen_utc >= cutoff OR first_seen_utc >= cutoff`
+  - Sorts by: classification DESC, impact_score DESC, update_count DESC, last_seen_utc DESC
+  - Filters by time window (24h, 72h, 7d)
+  - Optionally excludes classification 0 alerts
+
+- **Output Formats**:
+  - Markdown: Human-readable with sections for top impact, updated, new alerts
+  - JSON: Structured data for programmatic consumption
+
+**Key Design:**
+- Deterministic (no LLM, pure query + render)
+- Fast (direct SQL queries with proper indexing)
+- Requires database (queries stored alerts)
+
+### 7. Database Migrations (`sentinel/database/migrate.py`)
+
+**Purpose:** Additive schema changes for SQLite.
+
+- **Strategy**: Additive-only migrations (add columns, never remove)
+- **Storage**: ISO 8601 strings for datetime fields (lexicographically sortable)
+- **Safety**: Checks for column existence before adding
+- **Usage**: Called automatically before operations that need new columns
+
+**Key Design:**
+- Local-first: No external migration tools needed
+- Safe: Idempotent (can run multiple times)
+- Simple: Direct SQLite ALTER TABLE statements
+
+### 8. Runners (`sentinel/runners/`)
 
 **Purpose:** Executable scripts for common workflows.
 
@@ -100,10 +156,15 @@ Event Input → Normalization → Entity Linking → Alert Generation → Output
    - Find lanes originating from those facilities
    - Find upcoming shipments on those lanes
 4. **Alert Generation**: 
-   - Assess risk based on event type and severity
+   - Calculate network impact score (0-10)
+   - Map score to classification (0=Interesting, 1=Relevant, 2=Impactful)
    - Build alert with scope (facilities, shipments, lanes)
    - Generate recommended actions
-5. **Output**: Structured alert (JSON, future: Markdown brief)
+5. **Correlation**: 
+   - Build correlation key from event type, facility, lane
+   - Check for existing alerts within 7-day window
+   - Update existing or create new alert
+6. **Output**: Structured alert (JSON) or daily brief (Markdown/JSON)
 
 ### Network Data Loading
 
@@ -142,8 +203,7 @@ Event Input → Normalization → Entity Linking → Alert Generation → Output
 ## Future Enhancements
 
 - **LLM Agent**: Replace heuristic alert builder with LLM-based reasoning
-- **RSS Ingestion**: Monitor news feeds automatically
-- **Daily Brief**: Summarize alerts and events
-- **Markdown Output**: Human-readable alert reports
-- **Event Storage**: Persist events to database for historical analysis
+- **RSS Ingestion**: Monitor news feeds automatically (planned v0.6)
+- **JSON Event Ingestion**: Batch processing of JSON events (planned v0.6)
+- **Event Storage**: Persist events to database for historical analysis (schema exists, not yet active)
 

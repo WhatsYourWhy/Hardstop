@@ -164,6 +164,19 @@ def render_markdown(brief_data: Dict) -> str:
     )
     lines.append("")
     
+    # Quiet Day - check early
+    total = counts["new"] + counts["updated"]
+    if total == 0:
+        lines.append("## Quiet Day")
+        lines.append("")
+        lines.append("No alerts found for the selected time window.")
+        lines.append("")
+        lines.append("To generate alerts:")
+        lines.append("- Run `sentinel demo` to process events")
+        lines.append("- Configure event sources to ingest new events")
+        lines.append("")
+        return "\n".join(lines)
+    
     # Top Impact
     top = brief_data["top"]
     if top:
@@ -216,14 +229,6 @@ def render_markdown(brief_data: Dict) -> str:
         lines.append("")
         for alert in created:
             lines.append(f"- **[{alert['classification']}]** {alert['summary']}")
-        lines.append("")
-    
-    # Quiet Day
-    total = counts["new"] + counts["updated"]
-    if total == 0:
-        lines.append("## Quiet Day")
-        lines.append("")
-        lines.append("No alerts created or updated in the specified time window.")
         lines.append("")
     
     return "\n".join(lines)

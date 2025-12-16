@@ -6,21 +6,33 @@ The initial domain pack focuses on **supply chain risk** (facilities, lanes, shi
 
 ## Status
 
-- v0.1 — Scaffolding & demo pipeline
+- **v0.5** — Current implementation
+  - Event normalization and entity linking
+  - Deterministic alert generation with network impact scoring
+  - Alert correlation (deduplication over 7-day window)
+  - Daily brief generation (markdown/JSON)
+  - Local SQLite storage with additive migrations
 
-- Local Python CLI prototype
+## Features
 
-- SQLite storage, CSV + JSON ingestion, basic alert generation
+### Core Capabilities
 
-## Features (v1 scope)
+- **Event Processing**: Normalize raw events into canonical format
+- **Network Linking**: Automatically link events to facilities, lanes, and shipments
+- **Alert Generation**: Deterministic risk assessment using network impact scoring
+- **Alert Correlation**: Deduplicate and update alerts based on correlation keys
+- **Daily Brief**: Generate summaries of recent alerts (markdown or JSON)
 
-- Ingest structured and semi-structured inputs (CSV, JSON, RSS later)
+### Database Requirements
 
-- Normalize into canonical `Event` objects
+**Requires Database:**
+- `sentinel demo` — Needs DB for network linking and alert correlation
+- `sentinel brief` — Needs DB to query stored alerts
+- `sentinel ingest` — Needs DB to store network data
 
-- Run an "agent" that classifies risk and builds `Alert` objects
-
-- Render alerts and a simple daily brief as markdown/JSON
+**Works Without Database:**
+- Alert generation can fall back to `severity_guess` if no session provided
+- Event normalization (pure transformation, no DB needed)
 
 ## Project Structure
 
@@ -48,25 +60,23 @@ sentinel-agent/
 │       ├── parsing/
 │       │   ├── __init__.py
 │       │   ├── normalizer.py
-│       │   └── entity_extractor.py
-│       ├── agent/
-│       │   ├── __init__.py
-│       │   ├── sentinel_agent.py
-│       │   ├── llm_client.py
-│       │   └── prompts/
-│       │       └── sentinel_v1_prompt.txt
+│       │   ├── entity_extractor.py
+│       │   └── network_linker.py
 │       ├── database/
 │       │   ├── __init__.py
 │       │   ├── schema.py
-│       │   └── sqlite_client.py
+│       │   ├── sqlite_client.py
+│       │   ├── alert_repo.py
+│       │   └── migrate.py
 │       ├── alerts/
 │       │   ├── __init__.py
 │       │   ├── alert_models.py
-│       │   └── alert_builder.py
+│       │   ├── alert_builder.py
+│       │   ├── impact_scorer.py
+│       │   └── correlation.py
 │       ├── output/
 │       │   ├── __init__.py
-│       │   ├── daily_brief.py
-│       │   └── render_markdown.py
+│       │   └── daily_brief.py
 │       ├── runners/
 │       │   ├── __init__.py
 │       │   └── run_demo.py
@@ -104,8 +114,14 @@ pip install -e .
 # For contributors (includes pytest and other dev tools):
 pip install -e ".[dev]"
 
-# run demo pipeline
+# Load network data (required for demo and brief)
+sentinel ingest
+
+# Run demo pipeline
 sentinel demo
+
+# Generate daily brief
+sentinel brief --today
 ```
 
 ## Usage
@@ -115,14 +131,17 @@ sentinel demo
 Sentinel provides a simple CLI interface:
 
 ```bash
-# Run the demo pipeline
+# Run the demo pipeline (requires DB with network data)
 sentinel demo
 
-# Load network data from CSV files
+# Load network data from CSV files (requires DB)
 sentinel ingest
 
-# Generate daily brief (coming soon)
+# Generate daily brief (requires DB with alerts)
 sentinel brief --today
+
+# Brief with custom options
+sentinel brief --today --since 72h --format json --limit 50
 ```
 
 ### Running the Demo Pipeline
@@ -132,17 +151,47 @@ The demo pipeline (`sentinel demo`) demonstrates the core Sentinel workflow:
 1. Loads a sample JSON event from `tests/fixtures/event_spill.json`
 2. Normalizes the event into a canonical format
 3. Links the event to network data (facilities, lanes, shipments) from the database
-4. Builds a basic risk alert using heuristics
-5. Outputs the alert as formatted JSON
+4. Builds a risk alert using network impact scoring
+5. Correlates with existing alerts (if any) or creates new alert
+6. Outputs the alert as formatted JSON
 
-The demo provides a quick way to verify the installation and see the end-to-end flow from event ingestion to alert generation.
+**Prerequisites:** Run `sentinel ingest` first to load network data.
 
 ### Loading Network Data
 
-Before running the demo, load your network data:
+Before running the demo or generating briefs, load your network data:
 
 ```bash
 sentinel ingest
 ```
 
 This reads CSV files from `tests/fixtures/` (or paths specified in `sentinel.config.yaml`) and loads them into SQLite. The demo will then use this real network data to link events to facilities and shipments.
+
+### Daily Brief
+
+Generate a summary of recent alerts:
+
+```bash
+# Basic usage (last 24 hours, markdown)
+sentinel brief --today
+
+# Custom time window
+sentinel brief --today --since 72h
+
+# JSON output
+sentinel brief --today --format json
+
+# Include classification 0 alerts
+sentinel brief --today --include-class0
+
+# Custom limit
+sentinel brief --today --limit 50
+```
+
+The brief shows:
+- Top impactful alerts (classification 2)
+- Updated alerts (correlated to existing)
+- New alerts (newly created)
+- Summary counts by classification
+
+**Note:** Brief requires alerts to be persisted (created via `sentinel demo` or alert builder with session).

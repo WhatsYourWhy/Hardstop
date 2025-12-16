@@ -50,13 +50,19 @@ def cmd_brief(args: argparse.Namespace) -> None:
     ensure_alert_correlation_columns(sqlite_path)
     
     # Generate brief
-    with session_context(sqlite_path) as session:
-        brief_data = generate_brief(
-            session,
-            since_hours=since_hours,
-            include_class0=args.include_class0,
-            limit=args.limit,
-        )
+    try:
+        with session_context(sqlite_path) as session:
+            brief_data = generate_brief(
+                session,
+                since_hours=since_hours,
+                include_class0=args.include_class0,
+                limit=args.limit,
+            )
+    except Exception as e:
+        logger.error(f"Error generating brief: {e}")
+        print("Error: Could not generate brief. Ensure database exists and is accessible.")
+        print("Run `sentinel ingest` to create the database, then `sentinel demo` to generate alerts.")
+        return
     
     # Render output
     output_format = args.format or "md"

@@ -23,9 +23,12 @@ Sentinel v1 is a **local-first, domain-agnostic event → risk → alert engine*
 
 ### 3. Alert Generation
 
-- **Risk Assessment**: Map event severity to alert priority
+- **Risk Assessment**: Map network impact score to alert classification (0=Interesting, 1=Relevant, 2=Impactful)
 - **Scope Definition**: Identify affected facilities, shipments, lanes
 - **Action Recommendations**: Generate suggested next steps
+- **Correlation**: Deduplicate alerts based on correlation keys (7-day window)
+- **Persistence**: Alerts are persisted to database by default (v0.4+)
+- **Decision/Evidence Boundary**: Clear separation between decisions (classification, summary, scope) and evidence (diagnostics, linking notes, correlation metadata)
 
 ### 4. CLI Interface
 
@@ -186,14 +189,20 @@ sentinel ingest
 
 ### `sentinel brief --today`
 
-Generates daily brief (stub in v1).
+Generates daily brief of recent alerts.
 
 **Usage:**
 ```bash
 sentinel brief --today
 ```
 
-**Status:** Stub implementation in v1. Will show placeholder message.
+**Options:**
+- `--since 24h|72h|7d`: Time window (default: 24h)
+- `--format md|json`: Output format (default: md)
+- `--limit N`: Maximum alerts per section (default: 20)
+- `--include-class0`: Include classification 0 alerts
+
+**Status:** Implemented in v0.5. Queries alerts created or updated within the specified window.
 
 ## CSV File Formats
 
@@ -212,21 +221,49 @@ Required columns:
 Required columns:
 - `shipment_id`, `order_id`, `lane_id`, `sku_id`, `qty`, `status`, `ship_date`, `eta_date`, `customer_name`, `priority_flag`
 
-## Out of Scope for v1
+## Out of Scope for v1.0 Target
 
 - LLM-based reasoning (heuristic alerts only)
-- RSS feed monitoring
+- RSS feed monitoring (planned v0.6)
+- JSON event ingestor (planned v0.6)
 - Web UI or API server
 - Multi-user support
 - Cloud storage integration
 - Real-time event streaming
 - Advanced NLP for entity extraction
-- Alert persistence to database (alerts are generated on-demand)
+
+## Current Implementation Status (v0.5)
+
+### Implemented
+- ✅ Event normalization
+- ✅ Entity linking (network_linker)
+- ✅ Alert generation (heuristic-based, deterministic)
+- ✅ Alert correlation (v0.4)
+- ✅ Daily brief (v0.5)
+- ✅ Alert persistence (alerts stored in database)
+- ✅ Decision/evidence boundary (structured evidence model)
+- ✅ Robust ETA parsing with timezone handling
+- ✅ Additive database migrations
+
+### Planned for v0.6
+- JSON event ingestor (batch processing)
+- RSS feed monitoring
+- Enhanced error handling and validation
+
+### v1.0 Target Criteria
+
+Sentinel will be considered v1.0 when:
+- All core features are stable and well-tested
+- Documentation is complete and accurate
+- Migration path from v0.x is clear
+- API surface is stable (no planned breaking changes)
+- Performance characteristics are documented
+- Test coverage meets quality thresholds
 
 ## Future Considerations
 
-- **v1.1**: LLM agent for alert generation
-- **v1.2**: RSS ingestion and daily brief
-- **v1.3**: Alert persistence and historical analysis
+- **v0.6**: External event retrieval (JSON ingestor, RSS monitoring)
+- **v1.0**: Stable API, complete documentation, production-ready
+- **v1.1+**: LLM agent for alert generation (optional enhancement)
 - **v2.0**: Multi-domain support with pluggable domain packs
 
