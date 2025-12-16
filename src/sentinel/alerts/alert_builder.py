@@ -139,10 +139,15 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                     "key": correlation_key,
                     "action": "UPDATED",
                     "alert_id": existing.alert_id,
-                    "source_id": event.get("source_id"),
-                    "raw_id": event.get("raw_id"),
-                    "tier": event.get("tier"),
                 }
+                # Add source metadata if available
+                if event.get("source_id"):
+                    evidence.source = {
+                        "source_id": event.get("source_id"),
+                        "tier": event.get("tier"),
+                        "raw_id": event.get("raw_id"),
+                        "url": event.get("url"),
+                    }
                 evidence.linking_notes = (evidence.linking_notes or []) + [
                     f"Correlated to existing alert_id={existing.alert_id} via key={correlation_key}"
                 ]
@@ -173,10 +178,15 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                     "key": correlation_key,
                     "action": "CREATED",
                     "alert_id": alert_id,
-                    "source_id": event.get("source_id"),
-                    "raw_id": event.get("raw_id"),
-                    "tier": event.get("tier"),
                 }
+                # Add source metadata if available
+                if event.get("source_id"):
+                    evidence.source = {
+                        "source_id": event.get("source_id"),
+                        "tier": event.get("tier"),
+                        "raw_id": event.get("raw_id"),
+                        "url": event.get("url"),
+                    }
                 evidence.linking_notes = (evidence.linking_notes or []) + [
                     f"Created new correlated alert via key={correlation_key}"
                 ]
@@ -187,10 +197,15 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                 "key": correlation_key,
                 "action": None,  # Not persisted
                 "alert_id": None,
-                "source_id": event.get("source_id"),
-                "raw_id": event.get("raw_id"),
-                "tier": event.get("tier"),
             }
+            # Add source metadata if available
+            if event.get("source_id"):
+                evidence.source = {
+                    "source_id": event.get("source_id"),
+                    "tier": event.get("tier"),
+                    "raw_id": event.get("raw_id"),
+                    "url": event.get("url"),
+                }
 
     return SentinelAlert(
         alert_id=alert_id,

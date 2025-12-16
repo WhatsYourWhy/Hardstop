@@ -197,6 +197,7 @@ def normalize_external_event(
         "location_hint": location_hint,
         "entities_json": json.dumps(entities) if entities else None,
         "event_payload_json": json.dumps(payload, default=str),
+        "url": raw_item_candidate.get("url"),  # Include URL for source metadata
         "facilities": [],
         "lanes": [],
         "shipments": [],

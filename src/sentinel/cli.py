@@ -1,6 +1,9 @@
 """CLI entrypoint for Sentinel agent."""
 
 import argparse
+from pathlib import Path
+
+import requests
 
 from sentinel.config.loader import get_all_sources, load_config, load_sources_config
 from sentinel.database.migrate import (
@@ -9,6 +12,7 @@ from sentinel.database.migrate import (
     ensure_raw_items_table,
 )
 from sentinel.database.raw_item_repo import save_raw_item
+from sentinel.database.schema import Alert, Event, RawItem
 from sentinel.database.sqlite_client import session_context
 from sentinel.output.daily_brief import (
     _parse_since,
@@ -234,6 +238,132 @@ def cmd_run(args: argparse.Namespace) -> None:
     cmd_brief(brief_args)
 
 
+def cmd_doctor(args: argparse.Namespace) -> None:
+    """Run health checks on Sentinel system."""
+    print("Sentinel Doctor - Health Check")
+    print("=" * 50)
+    
+    issues = []
+    warnings = []
+    
+    # Check 1: DB exists and migrations applied
+    print("\n[1] Database Check...")
+    try:
+        config = load_config()
+        sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+        db_path = Path(sqlite_path)
+        
+        if not db_path.exists():
+            issues.append(f"Database not found: {sqlite_path}")
+            print(f"  [X] Database not found: {sqlite_path}")
+        else:
+            print(f"  [OK] Database exists: {sqlite_path}")
+            
+            # Try to apply migrations
+            try:
+                ensure_raw_items_table(sqlite_path)
+                ensure_event_external_fields(sqlite_path)
+                ensure_alert_correlation_columns(sqlite_path)
+                print("  [OK] Migrations applied")
+            except Exception as e:
+                issues.append(f"Migration error: {e}")
+                print(f"  [X] Migration error: {e}")
+            
+            # Check table counts
+            try:
+                with session_context(sqlite_path) as session:
+                    raw_count = session.query(RawItem).count()
+                    event_count = session.query(Event).count()
+                    alert_count = session.query(Alert).count()
+                    
+                    print(f"  [OK] raw_items: {raw_count}")
+                    print(f"  [OK] events: {event_count}")
+                    print(f"  [OK] alerts: {alert_count}")
+                    
+                    # Check status distribution
+                    if raw_count > 0:
+                        new_count = session.query(RawItem).filter(RawItem.status == "NEW").count()
+                        normalized_count = session.query(RawItem).filter(RawItem.status == "NORMALIZED").count()
+                        failed_count = session.query(RawItem).filter(RawItem.status == "FAILED").count()
+                        print(f"    - NEW: {new_count}, NORMALIZED: {normalized_count}, FAILED: {failed_count}")
+                        if new_count > 0:
+                            warnings.append(f"{new_count} raw items pending ingestion")
+            except Exception as e:
+                issues.append(f"Database query error: {e}")
+                print(f"  [X] Database query error: {e}")
+    except Exception as e:
+        issues.append(f"Config/database error: {e}")
+        print(f"  [X] Config/database error: {e}")
+    
+    # Check 2: sources.yaml is readable
+    print("\n[2] Sources Configuration...")
+    try:
+        sources_config = load_sources_config()
+        all_sources = get_all_sources(sources_config)
+        enabled_sources = [s for s in all_sources if s.get("enabled", True)]
+        
+        print(f"  [OK] Sources config loaded")
+        print(f"  [OK] Total sources: {len(all_sources)}")
+        print(f"  [OK] Enabled sources: {len(enabled_sources)}")
+        
+        # Count by tier
+        tier_counts = {"global": 0, "regional": 0, "local": 0}
+        for source in all_sources:
+            tier = source.get("tier", "unknown")
+            if tier in tier_counts:
+                tier_counts[tier] += 1
+        
+        print(f"    - Global: {tier_counts['global']}, Regional: {tier_counts['regional']}, Local: {tier_counts['local']}")
+        
+        if len(enabled_sources) == 0:
+            warnings.append("No enabled sources configured")
+    except FileNotFoundError:
+        issues.append("sources.yaml not found")
+        print("  [X] sources.yaml not found")
+    except Exception as e:
+        issues.append(f"Sources config error: {e}")
+        print(f"  [X] Sources config error: {e}")
+    
+    # Check 3: Network connectivity (basic)
+    print("\n[3] Network Connectivity...")
+    test_urls = [
+        ("NWS API", "https://api.weather.gov/alerts/active"),
+        ("Google DNS", "https://8.8.8.8"),  # Simple connectivity test
+    ]
+    
+    network_ok = False
+    for name, url in test_urls:
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code < 500:
+                print(f"  [OK] {name}: Reachable")
+                network_ok = True
+                break
+        except requests.RequestException:
+            continue
+    
+    if not network_ok:
+        warnings.append("Network connectivity test failed (may affect fetching)")
+        print("  [WARN] Network connectivity test failed")
+    
+    # Summary
+    print("\n" + "=" * 50)
+    if issues:
+        print(f"[X] Issues found: {len(issues)}")
+        for issue in issues:
+            print(f"  - {issue}")
+    else:
+        print("[OK] No critical issues found")
+    
+    if warnings:
+        print(f"\n[WARN] Warnings: {len(warnings)}")
+        for warning in warnings:
+            print(f"  - {warning}")
+    
+    if not issues and not warnings:
+        print("\n[OK] All checks passed!")
+
+
 def cmd_brief(args: argparse.Namespace) -> None:
     """Generate daily brief."""
     if not args.today:
@@ -412,6 +542,10 @@ def main() -> None:
         help="Include classification 0 (Interesting) alerts",
     )
     brief_parser.set_defaults(func=cmd_brief)
+    
+    # doctor command
+    doctor_parser = subparsers.add_parser("doctor", help="Run health checks on Sentinel system")
+    doctor_parser.set_defaults(func=cmd_doctor)
     
     args = parser.parse_args()
     

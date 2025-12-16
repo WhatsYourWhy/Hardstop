@@ -32,12 +32,15 @@ def ensure_alert_correlation_columns(sqlite_path: str) -> None:
     - update_count
     - root_event_ids_json
     
+    Also ensures classification column exists (v0.3+).
+    
     Args:
         sqlite_path: Path to SQLite database file
     """
     conn = sqlite3.connect(sqlite_path)
     try:
         additions: List[Tuple[str, str]] = [
+            ("classification", "INTEGER"),  # v0.3: Classification field (0=Interesting, 1=Relevant, 2=Impactful)
             ("correlation_key", "TEXT"),
             ("correlation_action", "TEXT"),  # v0.5: "CREATED" or "UPDATED"
             ("first_seen_utc", "TEXT"),  # SQLite stores datetime as TEXT

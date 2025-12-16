@@ -50,6 +50,8 @@ class AlertEvidence(BaseModel):
     correlation: Optional[dict[str, str | int | None]] = None  # Structured correlation info
     # Format: {"key": str, "action": "CREATED" | "UPDATED" | None, "alert_id": str | None}
     # When session is None, action and alert_id are None (key is always computed)
+    source: Optional[dict[str, str | None]] = None  # Source metadata for external events
+    # Format: {"source_id": str, "tier": str, "raw_id": str, "url": str | None}
 
 
 class SentinelAlert(BaseModel):
