@@ -20,6 +20,9 @@ tiers:
       tags: ["weather", "disruption"]
       geo:
         country: "US"
+      trust_tier: 3
+      classification_floor: 0
+      weighting_bias: 0
 
     - id: fda_food_safety_recalls
       type: rss
@@ -29,6 +32,9 @@ tiers:
       tags: ["recall", "food-safety", "supply-disruption"]
       geo:
         country: "US"
+      trust_tier: 3
+      classification_floor: 1
+      weighting_bias: 0
 
     - id: fda_all_recalls
       type: rss
@@ -38,6 +44,9 @@ tiers:
       tags: ["recall", "supply-disruption"]
       geo:
         country: "US"
+      trust_tier: 3
+      classification_floor: 1
+      weighting_bias: 0
 
     - id: fema_ipaws_all_hazards
       type: rss
@@ -61,6 +70,9 @@ tiers:
       geo:
         country: "US"
         state: "IN"
+      trust_tier: 3
+      classification_floor: 0
+      weighting_bias: 0
 
     - id: nws_active_il
       type: nws_alerts
@@ -71,6 +83,9 @@ tiers:
       geo:
         country: "US"
         state: "IL"
+      trust_tier: 3
+      classification_floor: 0
+      weighting_bias: 0
 
     - id: uscg_lnm_district_1
       type: rss
@@ -80,6 +95,9 @@ tiers:
       tags: ["port", "maritime", "uscg"]
       geo:
         country: "US"
+      trust_tier: 3
+      classification_floor: 0
+      weighting_bias: 0
       # USCG Local Notices to Mariners (District 1) via GovDelivery RSS
       # Official source: https://www.navcen.uscg.gov/subscribe-email-rss-feeds
 

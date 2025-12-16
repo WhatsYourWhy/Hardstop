@@ -6,7 +6,7 @@ from typing import Dict, Optional
 from sqlalchemy.orm import Session
 
 from sentinel.alerts.alert_builder import build_basic_alert
-from sentinel.config.loader import get_all_sources, load_sources_config
+from sentinel.config.loader import get_all_sources, get_source_with_defaults, load_sources_config
 from sentinel.database.event_repo import save_event
 from sentinel.database.raw_item_repo import (
     get_raw_items_for_ingest,
@@ -82,10 +82,11 @@ def main(
                 "payload": payload,
             }
             
-            # Get source config for metadata
-            source_config = all_sources.get(raw_item.source_id, {})
+            # Get source config for metadata (with v0.7 defaults applied)
+            source_config_raw = all_sources.get(raw_item.source_id, {})
+            source_config = get_source_with_defaults(source_config_raw) if source_config_raw else {}
             
-            # Normalize to event
+            # Normalize to event (injects tier/trust_tier/classification_floor/weighting_bias)
             event = normalize_external_event(
                 raw_item_candidate=candidate,
                 source_id=raw_item.source_id,

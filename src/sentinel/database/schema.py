@@ -69,6 +69,7 @@ class RawItem(Base):
     content_hash = Column(String, nullable=True, index=True)  # SHA256 hash
     status = Column(String, nullable=False, default="NEW")  # NEW, NORMALIZED, FAILED
     error = Column(Text, nullable=True)
+    trust_tier = Column(Integer, nullable=True)  # v0.7: 1|2|3 (default 2)
 
 
 class Event(Base):
@@ -90,6 +91,7 @@ class Event(Base):
     location_hint = Column(Text, nullable=True)  # v0.6: best-effort location text
     entities_json = Column(Text, nullable=True)  # v0.6: extracted entities as JSON
     event_payload_json = Column(Text, nullable=True)  # v0.6: normalized event as JSON
+    trust_tier = Column(Integer, nullable=True)  # v0.7: 1|2|3 (default 2)
 
 
 class Alert(Base):
@@ -116,6 +118,11 @@ class Alert(Base):
     # Brief fields (v0.5)
     impact_score = Column(Integer, nullable=True)  # Network impact score (0-10)
     scope_json = Column(Text, nullable=True)  # Scope as JSON: {"facilities": [...], "lanes": [...], "shipments": [...]}
+    
+    # v0.7: Tier-aware briefing and trust weighting
+    tier = Column(String, nullable=True)  # global, regional, local - for brief efficiency
+    source_id = Column(String, nullable=True, index=True)  # Last-updating source ID - for UI efficiency
+    trust_tier = Column(Integer, nullable=True)  # 1|2|3 (default 2) - source trust tier
 
 
 def create_all(engine_url: str) -> None:

@@ -103,21 +103,30 @@ def is_eta_within_48h(eta_date_str: Optional[str], now: Optional[datetime] = Non
     return timedelta(0) <= time_diff <= timedelta(hours=48)
 
 
-def calculate_network_impact_score(event: Dict, session: Session) -> Tuple[int, list[str]]:
+def calculate_network_impact_score(
+    event: Dict,
+    session: Session,
+    trust_tier: Optional[int] = None,
+    weighting_bias: Optional[int] = None,
+) -> Tuple[int, list[str]]:
     """
     Calculate network impact score based on linked facilities, lanes, and shipments.
     
-    Scoring rules (using 1-10 scale):
-    - +2 if any facility criticality_score ≥ 7
-    - +1 if any lane volume_score ≥ 7
-    - +1 if any shipment priority_flag = 1 (true)
-    - +1 more if >=5 priority shipments
-    - +1 more if any priority shipment ETA within 48h
-    - +1 if shipment_count ≥ 10
-    - +1 if event_type in {SPILL, STRIKE, CLOSURE}
+    Scoring rules (using 0-10 scale):
+    - Base network impact score (from facilities, lanes, shipments, event type)
+    - Trust tier bonus: +1 for tier 3, 0 for tier 2, -1 for tier 1
+    - Weighting bias: add bias value (manual nudge)
+    - Final score capped at 0-10
+    
+    Args:
+        event: Event dict with facilities, lanes, shipments
+        session: SQLAlchemy session for network queries
+        trust_tier: Optional trust tier (1|2|3). Default 2 if None.
+        weighting_bias: Optional weighting bias (-2..+2). Default 0 if None.
     
     Returns:
         Tuple of (impact_score, breakdown_list)
+        Breakdown shows each step in order for auditability
     """
     score = 0
     breakdown = []
@@ -198,6 +207,38 @@ def calculate_network_impact_score(event: Dict, session: Session) -> Tuple[int, 
     
     if not breakdown:
         breakdown.append("No impact factors detected")
+    
+    # Apply v0.7 trust tier bonus and weighting bias (in order)
+    base_score = score
+    
+    # Apply trust tier bonus
+    if trust_tier is None:
+        trust_tier = 2  # Default
+    
+    if trust_tier == 3:
+        score += 1
+        breakdown.append("+1: Trust tier 3 bonus (official/government source)")
+    elif trust_tier == 1:
+        score -= 1
+        breakdown.append("-1: Trust tier 1 penalty (lower trust source)")
+    # trust_tier == 2: no change (default)
+    
+    # Apply weighting bias
+    if weighting_bias is None:
+        weighting_bias = 0  # Default
+    
+    if weighting_bias != 0:
+        score += weighting_bias
+        breakdown.append(f"{'+' if weighting_bias > 0 else ''}{weighting_bias}: Weighting bias (manual adjustment)")
+    
+    # Cap final score at 0-10
+    original_score = score
+    score = max(0, min(10, score))
+    if score != original_score:
+        if original_score > 10:
+            breakdown.append(f"Capped at 10 (was {original_score})")
+        elif original_score < 0:
+            breakdown.append(f"Capped at 0 (was {original_score})")
     
     return score, breakdown
 

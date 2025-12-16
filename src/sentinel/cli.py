@@ -5,11 +5,12 @@ from pathlib import Path
 
 import requests
 
-from sentinel.config.loader import get_all_sources, load_config, load_sources_config
+from sentinel.config.loader import get_all_sources, get_source_with_defaults, load_config, load_sources_config
 from sentinel.database.migrate import (
     ensure_alert_correlation_columns,
     ensure_event_external_fields,
     ensure_raw_items_table,
+    ensure_trust_tier_columns,
 )
 from sentinel.database.raw_item_repo import save_raw_item
 from sentinel.database.schema import Alert, Event, RawItem
@@ -77,6 +78,7 @@ def cmd_fetch(args: argparse.Namespace) -> None:
     # Ensure migrations
     ensure_raw_items_table(sqlite_path)
     ensure_event_external_fields(sqlite_path)
+    ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
     
     # Create fetcher
     fetcher = SourceFetcher()
@@ -127,11 +129,13 @@ def cmd_fetch(args: argparse.Namespace) -> None:
         
         with session_context(sqlite_path) as session:
             for source_id, candidates in results.items():
-                # Get source config for tier
+                # Get source config for tier and trust_tier
                 sources_config = load_sources_config()
                 all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
-                source_config = all_sources.get(source_id, {})
+                source_config_raw = all_sources.get(source_id, {})
+                source_config = get_source_with_defaults(source_config_raw) if source_config_raw else {}
                 tier = source_config.get("tier", "unknown")
+                trust_tier = source_config.get("trust_tier", 2)
                 
                 for candidate in candidates:
                     try:
@@ -141,6 +145,7 @@ def cmd_fetch(args: argparse.Namespace) -> None:
                             source_id=source_id,
                             tier=tier,
                             candidate=candidate_dict,
+                            trust_tier=trust_tier,
                         )
                         total_stored += 1
                     except Exception as e:
@@ -167,6 +172,7 @@ def cmd_ingest_external(args: argparse.Namespace) -> None:
     ensure_raw_items_table(sqlite_path)
     ensure_event_external_fields(sqlite_path)
     ensure_alert_correlation_columns(sqlite_path)
+    ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
     
     # Parse min_tier
     min_tier = args.min_tier
@@ -265,11 +271,12 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             try:
                 missing_columns = []
                 
-                # Check alerts table columns
+                # Check alerts table columns (v0.7: includes trust_tier, tier, source_id)
                 alerts_required = [
                     "classification", "correlation_key", "correlation_action",
                     "first_seen_utc", "last_seen_utc", "update_count",
-                    "root_event_ids_json", "impact_score", "scope_json"
+                    "root_event_ids_json", "impact_score", "scope_json",
+                    "trust_tier", "tier", "source_id"  # v0.7
                 ]
                 for col in alerts_required:
                     cur = conn.execute("PRAGMA table_info(alerts);")
@@ -277,10 +284,11 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                     if col not in cols:
                         missing_columns.append(f"alerts.{col}")
                 
-                # Check events table columns
+                # Check events table columns (v0.7: includes trust_tier)
                 events_required = [
                     "source_id", "raw_id", "event_time_utc",
-                    "location_hint", "entities_json", "event_payload_json"
+                    "location_hint", "entities_json", "event_payload_json",
+                    "trust_tier"  # v0.7
                 ]
                 for col in events_required:
                     cur = conn.execute("PRAGMA table_info(events);")
@@ -288,12 +296,18 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                     if col not in cols:
                         missing_columns.append(f"events.{col}")
                 
-                # Check raw_items table exists
+                # Check raw_items table exists and has trust_tier column
                 cur = conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='raw_items';"
                 )
                 if not cur.fetchone():
                     missing_columns.append("table: raw_items")
+                else:
+                    # Check for trust_tier column in raw_items (v0.7)
+                    cur = conn.execute("PRAGMA table_info(raw_items);")
+                    cols = [row[1] for row in cur.fetchall()]
+                    if "trust_tier" not in cols:
+                        missing_columns.append("raw_items.trust_tier")
                 
                 if missing_columns:
                     issues.append(f"Schema drift detected: {len(missing_columns)} missing columns/tables")
@@ -312,6 +326,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                 ensure_raw_items_table(sqlite_path)
                 ensure_event_external_fields(sqlite_path)
                 ensure_alert_correlation_columns(sqlite_path)
+                ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
                 print("  [OK] Migrations applied")
             except Exception as e:
                 issues.append(f"Migration error: {e}")
@@ -433,8 +448,9 @@ def cmd_brief(args: argparse.Namespace) -> None:
     config = load_config()
     sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
     
-    # Ensure migration
+    # Ensure migrations
     ensure_alert_correlation_columns(sqlite_path)
+    ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
     
     # Generate brief
     try:

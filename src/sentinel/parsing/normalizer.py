@@ -152,10 +152,11 @@ def normalize_external_event(
         source_id: Source ID
         tier: Tier (global, regional, local)
         raw_id: Raw item ID
-        source_config: Optional source config (for geo metadata)
+        source_config: Optional source config (for geo metadata and v0.7 trust fields)
         
     Returns:
         Normalized event dict compatible with existing pipeline
+        Includes v0.7 fields: tier, trust_tier, classification_floor, weighting_bias
     """
     payload = raw_item_candidate.get("payload", {})
     title = raw_item_candidate.get("title") or payload.get("title") or ""
@@ -181,6 +182,11 @@ def normalize_external_event(
     if location_hint:
         entities["location"] = location_hint
     
+    # Extract v0.7 trust weighting fields from source_config (with defaults)
+    trust_tier = source_config.get("trust_tier", 2) if source_config else 2
+    classification_floor = source_config.get("classification_floor", 0) if source_config else 0
+    weighting_bias = source_config.get("weighting_bias", 0) if source_config else 0
+    
     # Build event dict
     event = {
         "event_id": new_event_id(),
@@ -188,7 +194,10 @@ def normalize_external_event(
         "source_name": source_id,
         "source_id": source_id,
         "raw_id": raw_id,
-        "tier": tier,
+        "tier": tier,  # v0.7: injected at normalization time
+        "trust_tier": trust_tier,  # v0.7: injected at normalization time (default 2)
+        "classification_floor": classification_floor,  # v0.7: injected at normalization time (default 0)
+        "weighting_bias": weighting_bias,  # v0.7: injected at normalization time (default 0)
         "title": title,
         "raw_text": raw_text,
         "event_type": event_type,

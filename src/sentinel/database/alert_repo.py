@@ -83,6 +83,9 @@ def upsert_new_alert_row(
     correlation_action: str = "CREATED",
     impact_score: int | None = None,
     scope_json: str | None = None,
+    tier: str | None = None,  # v0.7: tier for brief efficiency
+    source_id: str | None = None,  # v0.7: source ID for UI efficiency
+    trust_tier: int | None = None,  # v0.7: trust tier
 ) -> Alert:
     """
     Create a new alert row in the database.
@@ -113,7 +116,7 @@ def upsert_new_alert_row(
         summary=summary,
         risk_type=risk_type,
         classification=classification,
-        priority=classification,  # Backward compatibility: set to classification value
+        priority=classification,  # DEPRECATED: Mirrors classification for backward compatibility only. Do not use for logic.
         status=status,
         root_event_id=root_event_id,
         reasoning=reasoning,
@@ -125,6 +128,9 @@ def upsert_new_alert_row(
         update_count=0,
         impact_score=impact_score,
         scope_json=scope_json,
+        tier=tier,  # v0.7: tier for brief efficiency
+        source_id=source_id,  # v0.7: source ID for UI efficiency
+        trust_tier=trust_tier,  # v0.7: trust tier
     )
     save_root_event_ids(row, [root_event_id])
     session.add(row)
@@ -141,6 +147,9 @@ def update_existing_alert_row(
     correlation_action: str = "UPDATED",
     impact_score: int | None = None,
     scope_json: str | None = None,
+    tier: str | None = None,  # v0.7: tier (from latest event)
+    source_id: str | None = None,  # v0.7: source ID (from latest event)
+    trust_tier: int | None = None,  # v0.7: trust tier (from latest event)
 ) -> Alert:
     """
     Update an existing alert row with new information.
@@ -163,7 +172,7 @@ def update_existing_alert_row(
 
     row.summary = new_summary
     row.classification = max(row.classification or 0, new_classification)
-    row.priority = row.classification  # Backward compatibility: keep in sync
+    row.priority = row.classification  # DEPRECATED: Mirrors classification for backward compatibility only. Do not use for logic.
     row.status = "UPDATED"
     row.correlation_action = correlation_action  # Store fact about this update
     row.last_seen_utc = now_iso  # ISO string for consistent storage
@@ -174,6 +183,14 @@ def update_existing_alert_row(
     
     if scope_json is not None:
         row.scope_json = scope_json  # Update scope with latest event data
+    
+    # v0.7: Update tier/source_id/trust_tier from latest event (deterministic behavior)
+    if tier is not None:
+        row.tier = tier
+    if source_id is not None:
+        row.source_id = source_id
+    if trust_tier is not None:
+        row.trust_tier = trust_tier
 
     ids = load_root_event_ids(row)
     if root_event_id not in ids:

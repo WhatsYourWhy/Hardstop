@@ -101,3 +101,31 @@ def get_sources_by_tier(tier: str, config: Dict[str, Any] | None = None) -> List
     
     return config.get("tiers", {}).get(tier, [])
 
+
+def get_source_with_defaults(source: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Get source config with v0.7 trust weighting defaults applied.
+    
+    Defaults:
+    - trust_tier: 2 (if absent)
+    - classification_floor: 0 (if absent)
+    - weighting_bias: 0 (if absent)
+    
+    Args:
+        source: Source dictionary from config
+        
+    Returns:
+        Source dictionary with defaults applied
+    """
+    result = source.copy()
+    
+    # Apply defaults for v0.7 fields
+    if "trust_tier" not in result:
+        result["trust_tier"] = 2
+    if "classification_floor" not in result:
+        result["classification_floor"] = 0
+    if "weighting_bias" not in result:
+        result["weighting_bias"] = 0
+    
+    return result
+

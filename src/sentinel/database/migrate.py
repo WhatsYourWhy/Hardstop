@@ -132,3 +132,44 @@ def ensure_event_external_fields(sqlite_path: str) -> None:
     finally:
         conn.close()
 
+
+def ensure_trust_tier_columns(sqlite_path: str) -> None:
+    """
+    Add trust tier and tier-aware briefing columns if missing (v0.7).
+    
+    Adds:
+    - raw_items.trust_tier
+    - events.trust_tier
+    - alerts.trust_tier
+    - alerts.tier
+    - alerts.source_id
+    
+    Args:
+        sqlite_path: Path to SQLite database file
+    """
+    conn = sqlite3.connect(sqlite_path)
+    try:
+        # Add to raw_items
+        if not _column_exists(conn, "raw_items", "trust_tier"):
+            conn.execute("ALTER TABLE raw_items ADD COLUMN trust_tier INTEGER;")
+        
+        # Add to events
+        if not _column_exists(conn, "events", "trust_tier"):
+            conn.execute("ALTER TABLE events ADD COLUMN trust_tier INTEGER;")
+        
+        # Add to alerts
+        additions: List[Tuple[str, str]] = [
+            ("trust_tier", "INTEGER"),
+            ("tier", "TEXT"),
+            ("source_id", "TEXT"),
+        ]
+        for col, coltype in additions:
+            if not _column_exists(conn, "alerts", col):
+                conn.execute(f"ALTER TABLE alerts ADD COLUMN {col} {coltype};")
+        
+        # Create index for alerts.source_id
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_source_id ON alerts(source_id);")
+        conn.commit()
+    finally:
+        conn.close()
+

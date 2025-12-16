@@ -50,6 +50,7 @@ def save_event(session: Session, event: Dict) -> Event:
         location_hint=event.get("location_hint"),
         entities_json=event.get("entities_json"),
         event_payload_json=event.get("event_payload_json"),
+        trust_tier=event.get("trust_tier"),  # v0.7: store trust_tier
     )
     
     session.add(event_row)

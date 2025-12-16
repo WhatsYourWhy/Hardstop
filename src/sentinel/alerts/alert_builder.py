@@ -45,11 +45,30 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
     summary = event.get("title", "Risk event detected")
     risk_type = event.get("event_type", "GENERAL")
     
+    # Extract v0.7 fields from event (already injected by normalizer)
+    trust_tier = event.get("trust_tier", 2)  # Default 2 if absent
+    weighting_bias = event.get("weighting_bias", 0)  # Default 0 if absent
+    classification_floor = event.get("classification_floor", 0)  # Default 0 if absent
+    tier = event.get("tier")
+    source_id = event.get("source_id")
+    
     # Calculate classification based on network impact
     evidence = None
     if session:
-        impact_score, breakdown = calculate_network_impact_score(event, session)
+        impact_score, breakdown = calculate_network_impact_score(
+            event,
+            session,
+            trust_tier=trust_tier,
+            weighting_bias=weighting_bias,
+        )
         classification = map_score_to_classification(impact_score)
+        
+        # Enforce classification floor (v0.7)
+        original_classification = classification
+        classification = max(classification, classification_floor)
+        if classification != original_classification:
+            reasoning.append(f"Classification floor: {classification_floor} (source policy) - raised from {original_classification}")
+        
         classification_source = f"network_impact_score={impact_score}"
         
         # Build evidence object (non-decisional)
@@ -119,7 +138,7 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
         existing = find_recent_alert_by_key(session, correlation_key, within_days=7)
         
         if existing:
-            # Update existing alert
+            # Update existing alert (v0.7: store tier/source_id/trust_tier from latest event)
             update_existing_alert_row(
                 session,
                 existing,
@@ -129,6 +148,9 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                 correlation_action="UPDATED",
                 impact_score=impact_score if session else None,
                 scope_json=scope_json,  # Update scope with latest event data
+                tier=tier,  # v0.7: update tier from latest event
+                source_id=source_id,  # v0.7: update source_id from latest event
+                trust_tier=trust_tier,  # v0.7: update trust_tier from latest event
             )
             session.commit()
             
@@ -140,13 +162,14 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                     "action": "UPDATED",
                     "alert_id": existing.alert_id,
                 }
-                # Add source metadata if available
+                # Add source metadata if available (v0.7: includes trust_tier)
                 if event.get("source_id"):
                     evidence.source = {
-                        "source_id": event.get("source_id"),
+                        "id": event.get("source_id"),
                         "tier": event.get("tier"),
                         "raw_id": event.get("raw_id"),
                         "url": event.get("url"),
+                        "trust_tier": trust_tier,
                     }
                 evidence.linking_notes = (evidence.linking_notes or []) + [
                     f"Correlated to existing alert_id={existing.alert_id} via key={correlation_key}"
@@ -170,6 +193,9 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                 correlation_action="CREATED",
                 impact_score=impact_score if session else None,
                 scope_json=scope_json,
+                tier=tier,  # v0.7: store tier for brief efficiency
+                source_id=source_id,  # v0.7: store source_id for UI efficiency
+                trust_tier=trust_tier,  # v0.7: store trust_tier
             )
             session.commit()
             
@@ -179,13 +205,14 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                     "action": "CREATED",
                     "alert_id": alert_id,
                 }
-                # Add source metadata if available
+                # Add source metadata if available (v0.7: includes trust_tier)
                 if event.get("source_id"):
                     evidence.source = {
-                        "source_id": event.get("source_id"),
+                        "id": event.get("source_id"),
                         "tier": event.get("tier"),
                         "raw_id": event.get("raw_id"),
                         "url": event.get("url"),
+                        "trust_tier": trust_tier,
                     }
                 evidence.linking_notes = (evidence.linking_notes or []) + [
                     f"Created new correlated alert via key={correlation_key}"
@@ -198,13 +225,14 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                 "action": None,  # Not persisted
                 "alert_id": None,
             }
-            # Add source metadata if available
+            # Add source metadata if available (v0.7: includes trust_tier)
             if event.get("source_id"):
                 evidence.source = {
-                    "source_id": event.get("source_id"),
+                    "id": event.get("source_id"),
                     "tier": event.get("tier"),
                     "raw_id": event.get("raw_id"),
                     "url": event.get("url"),
+                    "trust_tier": trust_tier,
                 }
 
     return SentinelAlert(

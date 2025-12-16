@@ -20,6 +20,7 @@ def save_raw_item(
     tier: str,
     candidate: Dict,
     fetched_at_utc: Optional[str] = None,
+    trust_tier: Optional[int] = None,
 ) -> RawItem:
     """
     Save a raw item candidate to the database with deduplication.
@@ -30,6 +31,7 @@ def save_raw_item(
         tier: Tier (global, regional, local)
         candidate: RawItemCandidate dict
         fetched_at_utc: Optional ISO 8601 timestamp. If None, uses current time.
+        trust_tier: Optional trust tier (1|2|3). Default 2 if None.
         
     Returns:
         RawItem row (new or existing)
@@ -80,6 +82,7 @@ def save_raw_item(
         content_hash=content_hash,
         status="NEW",
         error=None,
+        trust_tier=trust_tier,
     )
     
     session.add(raw_item)
