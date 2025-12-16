@@ -42,7 +42,8 @@ def main() -> None:
     finally:
         session.close()
 
-    alert = build_basic_alert(event)
+    # Build alert with network impact scoring
+    alert = build_basic_alert(event, session=session)
 
     logger.info("Built alert:")
     print(alert.model_dump_json(indent=2))
