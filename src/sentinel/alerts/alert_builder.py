@@ -80,6 +80,15 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
         lanes=event.get("lanes", []),
         shipments=event.get("shipments", []),
     )
+    
+    # Prepare scope JSON for database storage
+    scope_json = json.dumps({
+        "facilities": scope.facilities,
+        "lanes": scope.lanes,
+        "shipments": scope.shipments,
+        "shipments_total_linked": event.get("shipments_total_linked", len(scope.shipments)),
+        "shipments_truncated": event.get("shipments_truncated", False),
+    })
 
     impact_assessment = AlertImpactAssessment(
         qualitative_impact=[event.get("raw_text", "")[:280]],
@@ -115,6 +124,7 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                 new_summary=summary,
                 new_classification=classification,
                 root_event_id=root_event_id,
+                impact_score=impact_score if session else None,
             )
             session.commit()
             
@@ -145,6 +155,8 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
                 recommended_actions=actions_text,
                 root_event_id=root_event_id,
                 correlation_key=correlation_key,
+                impact_score=impact_score if session else None,
+                scope_json=scope_json,
             )
             session.commit()
             

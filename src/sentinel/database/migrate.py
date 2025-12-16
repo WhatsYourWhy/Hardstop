@@ -34,6 +34,8 @@ def ensure_alert_correlation_columns(sqlite_path: str) -> None:
             ("last_seen_utc", "TEXT"),
             ("update_count", "INTEGER"),
             ("root_event_ids_json", "TEXT"),
+            ("impact_score", "INTEGER"),  # v0.5: Network impact score
+            ("scope_json", "TEXT"),  # v0.5: Scope as JSON
         ]
         for col, coltype in additions:
             if not _column_exists(conn, "alerts", col):

@@ -1,8 +1,16 @@
 """CLI entrypoint for Sentinel agent."""
 
 import argparse
-from datetime import date
 
+from sentinel.config.loader import load_config
+from sentinel.database.migrate import ensure_alert_correlation_columns
+from sentinel.database.sqlite_client import session_context
+from sentinel.output.daily_brief import (
+    _parse_since,
+    generate_brief,
+    render_json,
+    render_markdown,
+)
 from sentinel.runners.load_network import main as load_network_main
 from sentinel.runners.run_demo import main as run_demo_main
 from sentinel.utils.logging import get_logger
@@ -21,14 +29,41 @@ def cmd_ingest(args: argparse.Namespace) -> None:
 
 
 def cmd_brief(args: argparse.Namespace) -> None:
-    """Generate daily brief (stub implementation)."""
-    today = date.today()
-    print(f"Sentinel Daily Brief — {today}")
-    print()
-    print("Daily brief generation is not yet implemented.")
-    print("This command will summarize open alerts and notable changes.")
-    print()
-    print("Coming in a future release.")
+    """Generate daily brief."""
+    if not args.today:
+        logger.error("--today flag is required")
+        return
+    
+    # Parse --since argument
+    since_str = args.since or "24h"
+    try:
+        since_hours = _parse_since(since_str)
+    except ValueError as e:
+        logger.error(str(e))
+        return
+    
+    # Get database path
+    config = load_config()
+    sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    
+    # Ensure migration
+    ensure_alert_correlation_columns(sqlite_path)
+    
+    # Generate brief
+    with session_context(sqlite_path) as session:
+        brief_data = generate_brief(
+            session,
+            since_hours=since_hours,
+            include_class0=args.include_class0,
+            limit=args.limit,
+        )
+    
+    # Render output
+    output_format = args.format or "md"
+    if output_format == "json":
+        print(render_json(brief_data))
+    else:
+        print(render_markdown(brief_data))
 
 
 def main() -> None:
@@ -59,6 +94,30 @@ def main() -> None:
         "--today",
         action="store_true",
         help="Generate brief for today (required)",
+    )
+    brief_parser.add_argument(
+        "--since",
+        type=str,
+        default="24h",
+        help="Time window: 24h, 72h, or 7d (default: 24h)",
+    )
+    brief_parser.add_argument(
+        "--format",
+        type=str,
+        choices=["md", "json"],
+        default="md",
+        help="Output format: md or json (default: md)",
+    )
+    brief_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of alerts per section (default: 20)",
+    )
+    brief_parser.add_argument(
+        "--include-class0",
+        action="store_true",
+        help="Include classification 0 (Interesting) alerts",
     )
     brief_parser.set_defaults(func=cmd_brief)
     

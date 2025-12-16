@@ -2,8 +2,9 @@
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..database.schema import Alert
@@ -79,6 +80,8 @@ def upsert_new_alert_row(
     recommended_actions: str | None,
     root_event_id: str,
     correlation_key: str,
+    impact_score: int | None = None,
+    scope_json: str | None = None,
 ) -> Alert:
     """
     Create a new alert row in the database.
@@ -94,6 +97,8 @@ def upsert_new_alert_row(
         recommended_actions: Recommended actions text (can be None)
         root_event_id: Root event ID
         correlation_key: Correlation key
+        impact_score: Network impact score (0-10, optional)
+        scope_json: Scope as JSON string (optional)
         
     Returns:
         Created Alert row
@@ -114,6 +119,8 @@ def upsert_new_alert_row(
         first_seen_utc=now_iso,  # ISO string for consistent storage
         last_seen_utc=now_iso,   # ISO string for consistent storage
         update_count=0,
+        impact_score=impact_score,
+        scope_json=scope_json,
     )
     save_root_event_ids(row, [root_event_id])
     session.add(row)
@@ -127,6 +134,7 @@ def update_existing_alert_row(
     new_summary: str,
     new_classification: int,
     root_event_id: str,
+    impact_score: int | None = None,
 ) -> Alert:
     """
     Update an existing alert row with new information.
@@ -137,6 +145,7 @@ def update_existing_alert_row(
         new_summary: New summary text
         new_classification: New classification (takes max of old and new)
         root_event_id: New root event ID to add to list
+        impact_score: New impact score (optional, updates if provided)
         
     Returns:
         Updated Alert row
@@ -149,6 +158,9 @@ def update_existing_alert_row(
     row.status = "UPDATED"
     row.last_seen_utc = now_iso  # ISO string for consistent storage
     row.update_count = (row.update_count or 0) + 1
+    
+    if impact_score is not None:
+        row.impact_score = impact_score
 
     ids = load_root_event_ids(row)
     if root_event_id not in ids:
@@ -157,4 +169,50 @@ def update_existing_alert_row(
 
     session.add(row)
     return row
+
+
+def query_recent_alerts(
+    session: Session,
+    since_hours: int = 24,
+    include_class0: bool = False,
+    limit: int = 20,
+) -> List[Alert]:
+    """
+    Query alerts that were created or updated within the specified time window.
+    
+    Args:
+        session: SQLAlchemy session
+        since_hours: How many hours back to look (default 24)
+        include_class0: Whether to include classification 0 alerts (default False)
+        limit: Maximum number of alerts to return (default 20)
+        
+    Returns:
+        List of Alert rows, sorted by classification DESC, impact_score DESC,
+        update_count DESC, last_seen_utc DESC
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    cutoff_iso = cutoff.isoformat()
+    
+    # Query: last_seen_utc >= cutoff OR first_seen_utc >= cutoff
+    q = session.query(Alert).filter(
+        or_(
+            Alert.last_seen_utc >= cutoff_iso,
+            Alert.first_seen_utc >= cutoff_iso,
+        )
+    )
+    
+    # Filter out class 0 if not included
+    if not include_class0:
+        q = q.filter(Alert.classification > 0)
+    
+    # Sort: classification DESC, impact_score DESC (nulls last), update_count DESC, last_seen_utc DESC
+    # Note: SQLite TEXT comparison works for ISO 8601 strings
+    q = q.order_by(
+        Alert.classification.desc(),
+        Alert.impact_score.desc().nullslast(),
+        Alert.update_count.desc().nullslast(),
+        Alert.last_seen_utc.desc().nullslast(),
+    )
+    
+    return q.limit(limit).all()
 

@@ -88,6 +88,10 @@ class Alert(Base):
     last_seen_utc = Column(DateTime, nullable=True)
     update_count = Column(Integer, nullable=True)
     root_event_ids_json = Column(Text, nullable=True)  # Store list as JSON string
+    
+    # Brief fields (v0.5)
+    impact_score = Column(Integer, nullable=True)  # Network impact score (0-10)
+    scope_json = Column(Text, nullable=True)  # Scope as JSON: {"facilities": [...], "lanes": [...], "shipments": [...]}
 
 
 def create_all(engine_url: str) -> None:
