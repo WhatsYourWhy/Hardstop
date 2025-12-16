@@ -43,8 +43,8 @@ def ensure_alert_correlation_columns(sqlite_path: str) -> None:
             ("classification", "INTEGER"),  # v0.3: Classification field (0=Interesting, 1=Relevant, 2=Impactful)
             ("correlation_key", "TEXT"),
             ("correlation_action", "TEXT"),  # v0.5: "CREATED" or "UPDATED"
-            ("first_seen_utc", "TEXT"),  # SQLite stores datetime as TEXT
-            ("last_seen_utc", "TEXT"),
+            ("first_seen_utc", "TEXT"),  # ISO 8601 string for consistent storage
+            ("last_seen_utc", "TEXT"),  # ISO 8601 string for consistent storage
             ("update_count", "INTEGER"),
             ("root_event_ids_json", "TEXT"),
             ("impact_score", "INTEGER"),  # v0.5: Network impact score

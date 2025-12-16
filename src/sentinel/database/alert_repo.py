@@ -113,6 +113,7 @@ def upsert_new_alert_row(
         summary=summary,
         risk_type=risk_type,
         classification=classification,
+        priority=classification,  # Backward compatibility: set to classification value
         status=status,
         root_event_id=root_event_id,
         reasoning=reasoning,
@@ -162,6 +163,7 @@ def update_existing_alert_row(
 
     row.summary = new_summary
     row.classification = max(row.classification or 0, new_classification)
+    row.priority = row.classification  # Backward compatibility: keep in sync
     row.status = "UPDATED"
     row.correlation_action = correlation_action  # Store fact about this update
     row.last_seen_utc = now_iso  # ISO string for consistent storage

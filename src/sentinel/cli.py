@@ -259,6 +259,53 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         else:
             print(f"  [OK] Database exists: {sqlite_path}")
             
+            # Check for schema drift - specific missing columns
+            import sqlite3
+            conn = sqlite3.connect(sqlite_path)
+            try:
+                missing_columns = []
+                
+                # Check alerts table columns
+                alerts_required = [
+                    "classification", "correlation_key", "correlation_action",
+                    "first_seen_utc", "last_seen_utc", "update_count",
+                    "root_event_ids_json", "impact_score", "scope_json"
+                ]
+                for col in alerts_required:
+                    cur = conn.execute("PRAGMA table_info(alerts);")
+                    cols = [row[1] for row in cur.fetchall()]
+                    if col not in cols:
+                        missing_columns.append(f"alerts.{col}")
+                
+                # Check events table columns
+                events_required = [
+                    "source_id", "raw_id", "event_time_utc",
+                    "location_hint", "entities_json", "event_payload_json"
+                ]
+                for col in events_required:
+                    cur = conn.execute("PRAGMA table_info(events);")
+                    cols = [row[1] for row in cur.fetchall()]
+                    if col not in cols:
+                        missing_columns.append(f"events.{col}")
+                
+                # Check raw_items table exists
+                cur = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='raw_items';"
+                )
+                if not cur.fetchone():
+                    missing_columns.append("table: raw_items")
+                
+                if missing_columns:
+                    issues.append(f"Schema drift detected: {len(missing_columns)} missing columns/tables")
+                    print(f"  [X] Schema drift detected:")
+                    for col in missing_columns:
+                        print(f"      - Missing: {col}")
+                    print(f"  [INFO] Run migrations or delete {sqlite_path} and re-run")
+                else:
+                    print("  [OK] Schema is up to date")
+            finally:
+                conn.close()
+            
             # Try to apply migrations
             try:
                 ensure_raw_items_table(sqlite_path)

@@ -23,21 +23,26 @@ tiers:
 
     - id: fema_ipaws_all_hazards
       type: rss
-      enabled: true
+      enabled: false
       tier: global
-      url: "https://www.fema.gov/api/open/v1/DisasterDeclarationsSummaries"
+      url: "https://www.fema.gov/rss/feeds/disasters.xml"
       tags: ["disaster", "public-alerts"]
       geo:
         country: "US"
+      # Note: FEMA RSS feeds may require registration. Disabled by default.
+      # Official source: https://www.fema.gov/emergency-managers/practitioners/integrated-public-alert-warning-system/technology-developers/all-hazards-information-feed
 
     - id: fda_recalls
       type: rss
-      enabled: true
+      enabled: false
       tier: global
-      url: "https://www.fda.gov/feeds/cfsan/recalls.xml"
+      url: "https://www.fda.gov/AboutFDA/ContactFDA/Subscribe/feeds/recalls.xml"
       tags: ["recall", "food-safety", "supply-disruption"]
       geo:
         country: "US"
+      # Note: FDA RSS feed URL needs to be verified from official subscribe page
+      # Official source: https://www.fda.gov/about-fda/contact-fda/subscribe-podcasts-and-news-feeds
+      # Disabled until correct URL is confirmed
 
   regional:
     - id: nws_active_in
@@ -65,8 +70,9 @@ tiers:
       type: rss
       enabled: true
       tier: local
-      url: "https://www.navcen.uscg.gov/news-and-notices"
+      url: "https://www.navcen.uscg.gov/?pageName=newsRSS"
       tags: ["port", "maritime", "uscg"]
       geo:
         country: "US"
+      # Official source: https://www.navcen.uscg.gov/subscribe-email-rss-feeds
 

@@ -117,8 +117,13 @@ def main(
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Failed to process raw_item {raw_item.raw_id}: {error_msg}", exc_info=True)
-            mark_raw_item_status(session, raw_item.raw_id, "FAILED", error=error_msg)
-            session.commit()
+            try:
+                session.rollback()  # Rollback failed transaction
+                mark_raw_item_status(session, raw_item.raw_id, "FAILED", error=error_msg)
+                session.commit()
+            except Exception as rollback_error:
+                logger.error(f"Failed to rollback and mark status: {rollback_error}")
+                session.rollback()
             stats["errors"] += 1
     
     logger.info(
