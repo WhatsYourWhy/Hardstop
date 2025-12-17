@@ -5,11 +5,19 @@ from pathlib import Path
 
 import requests
 
-from sentinel.config.loader import get_all_sources, get_source_with_defaults, load_config, load_sources_config
+from sentinel.config.loader import (
+    get_all_sources,
+    get_source_with_defaults,
+    get_suppression_rules_for_source,
+    load_config,
+    load_sources_config,
+    load_suppression_config,
+)
 from sentinel.database.migrate import (
     ensure_alert_correlation_columns,
     ensure_event_external_fields,
     ensure_raw_items_table,
+    ensure_suppression_columns,
     ensure_trust_tier_columns,
 )
 from sentinel.database.raw_item_repo import save_raw_item
@@ -178,6 +186,7 @@ def cmd_ingest_external(args: argparse.Namespace) -> None:
     ensure_event_external_fields(sqlite_path)
     ensure_alert_correlation_columns(sqlite_path)
     ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
+    ensure_suppression_columns(sqlite_path)  # v0.8: suppression columns
     
     # Parse min_tier
     min_tier = args.min_tier
@@ -198,12 +207,16 @@ def cmd_ingest_external(args: argparse.Namespace) -> None:
                 min_tier=min_tier,
                 source_id=args.source_id,
                 since_hours=since_hours,
+                no_suppress=getattr(args, 'no_suppress', False),
+                explain_suppress=getattr(args, 'explain_suppress', False),
             )
             
             print(f"Ingestion complete:")
             print(f"  Processed: {stats['processed']}")
             print(f"  Events: {stats['events']}")
             print(f"  Alerts: {stats['alerts']}")
+            if stats.get('suppressed', 0) > 0:
+                print(f"  Suppressed: {stats['suppressed']}")
             print(f"  Errors: {stats['errors']}")
     
     except Exception as e:
@@ -234,6 +247,8 @@ def cmd_run(args: argparse.Namespace) -> None:
         min_tier=None,
         source_id=None,
         since=since_str,
+        no_suppress=getattr(args, 'no_suppress', False),
+        explain_suppress=False,
     )
     cmd_ingest_external(ingest_args)
     
@@ -289,11 +304,12 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                     if col not in cols:
                         missing_columns.append(f"alerts.{col}")
                 
-                # Check events table columns (v0.7: includes trust_tier)
+                # Check events table columns (v0.7: includes trust_tier, v0.8: includes suppression)
                 events_required = [
                     "source_id", "raw_id", "event_time_utc",
                     "location_hint", "entities_json", "event_payload_json",
-                    "trust_tier"  # v0.7
+                    "trust_tier",  # v0.7
+                    "suppression_primary_rule_id", "suppression_rule_ids_json", "suppressed_at_utc",  # v0.8
                 ]
                 for col in events_required:
                     cur = conn.execute("PRAGMA table_info(events);")
@@ -308,11 +324,16 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                 if not cur.fetchone():
                     missing_columns.append("table: raw_items")
                 else:
-                    # Check for trust_tier column in raw_items (v0.7)
+                    # Check for trust_tier and suppression columns in raw_items (v0.7, v0.8)
                     cur = conn.execute("PRAGMA table_info(raw_items);")
                     cols = [row[1] for row in cur.fetchall()]
                     if "trust_tier" not in cols:
                         missing_columns.append("raw_items.trust_tier")
+                    # v0.8: suppression columns
+                    suppression_cols = ["suppression_status", "suppression_primary_rule_id", "suppression_rule_ids_json", "suppressed_at_utc", "suppression_stage"]
+                    for col in suppression_cols:
+                        if col not in cols:
+                            missing_columns.append(f"raw_items.{col}")
                 
                 if missing_columns:
                     issues.append(f"Schema drift detected: {len(missing_columns)} missing columns/tables")
@@ -332,6 +353,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                 ensure_event_external_fields(sqlite_path)
                 ensure_alert_correlation_columns(sqlite_path)
                 ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
+                ensure_suppression_columns(sqlite_path)  # v0.8: suppression columns
                 print("  [OK] Migrations applied")
             except Exception as e:
                 issues.append(f"Migration error: {e}")
@@ -353,7 +375,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                         new_count = session.query(RawItem).filter(RawItem.status == "NEW").count()
                         normalized_count = session.query(RawItem).filter(RawItem.status == "NORMALIZED").count()
                         failed_count = session.query(RawItem).filter(RawItem.status == "FAILED").count()
-                        print(f"    - NEW: {new_count}, NORMALIZED: {normalized_count}, FAILED: {failed_count}")
+                        suppressed_count = session.query(RawItem).filter(RawItem.suppression_status == "SUPPRESSED").count()
+                        print(f"    - NEW: {new_count}, NORMALIZED: {normalized_count}, FAILED: {failed_count}, SUPPRESSED: {suppressed_count}")
                         if new_count > 0:
                             warnings.append(f"{new_count} raw items pending ingestion")
             except Exception as e:
@@ -417,6 +440,75 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         warnings.append("Network connectivity test failed (may affect fetching)")
         print(f"  [WARN] NWS API: Connection failed - {e}")
     
+    # Check 4: Suppression configuration (v0.8)
+    print("\n[4] Suppression Configuration...")
+    try:
+        suppression_config = load_suppression_config()
+        suppression_enabled = suppression_config.get("enabled", True)
+        global_rules = suppression_config.get("rules", [])
+        
+        print(f"  [OK] Suppression config loaded")
+        print(f"  [OK] Suppression enabled: {'yes' if suppression_enabled else 'no'}")
+        print(f"  [OK] Global rules: {len(global_rules)}")
+        
+        # Count per-source rules
+        try:
+            sources_config = load_sources_config()
+            all_sources = get_all_sources(sources_config)
+            per_source_rules_count = 0
+            all_rule_ids = set()
+            duplicate_rule_ids = set()
+            
+            # Collect global rule IDs
+            for rule in global_rules:
+                rule_id = rule.get("id") if isinstance(rule, dict) else getattr(rule, "id", None)
+                if rule_id:
+                    if rule_id in all_rule_ids:
+                        duplicate_rule_ids.add(rule_id)
+                    all_rule_ids.add(rule_id)
+            
+            # Collect per-source rule IDs
+            for source in all_sources:
+                source_rules = get_suppression_rules_for_source(source)
+                per_source_rules_count += len(source_rules)
+                for rule in source_rules:
+                    rule_id = rule.get("id") if isinstance(rule, dict) else getattr(rule, "id", None)
+                    if rule_id:
+                        if rule_id in all_rule_ids:
+                            duplicate_rule_ids.add(rule_id)
+                        all_rule_ids.add(rule_id)
+            
+            print(f"  [OK] Per-source rules: {per_source_rules_count} total")
+            print(f"  [OK] Total rules: {len(all_rule_ids)}")
+            
+            if duplicate_rule_ids:
+                warnings.append(f"Duplicate rule IDs found: {', '.join(sorted(duplicate_rule_ids))}")
+                print(f"  [WARN] Duplicate rule IDs: {', '.join(sorted(duplicate_rule_ids))}")
+            
+            # Show suppressed count if DB exists
+            if db_path.exists():
+                try:
+                    with session_context(sqlite_path) as session:
+                        from datetime import datetime, timedelta, timezone
+                        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+                        cutoff_iso = cutoff.isoformat()
+                        suppressed_24h = session.query(RawItem).filter(
+                            RawItem.suppression_status == "SUPPRESSED",
+                            RawItem.suppressed_at_utc >= cutoff_iso,
+                        ).count()
+                        if suppressed_24h > 0:
+                            print(f"  [OK] Suppressed (last 24h): {suppressed_24h}")
+                except Exception:
+                    pass  # Ignore DB errors in suppression check
+        except Exception as e:
+            warnings.append(f"Error counting per-source rules: {e}")
+            print(f"  [WARN] Error counting per-source rules: {e}")
+    except FileNotFoundError:
+        print("  [INFO] Suppression config not found (suppression disabled)")
+    except Exception as e:
+        warnings.append(f"Suppression config error: {e}")
+        print(f"  [WARN] Suppression config error: {e}")
+    
     # Summary
     print("\n" + "=" * 50)
     if issues:
@@ -456,6 +548,7 @@ def cmd_brief(args: argparse.Namespace) -> None:
     # Ensure migrations
     ensure_alert_correlation_columns(sqlite_path)
     ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
+    ensure_suppression_columns(sqlite_path)  # v0.8: suppression columns
     
     # Generate brief
     try:
@@ -570,6 +663,16 @@ def main() -> None:
         type=str,
         help="Only process items fetched within this time window (24h, 72h, 7d)",
     )
+    ingest_external_parser.add_argument(
+        "--no-suppress",
+        action="store_true",
+        help="Bypass suppression entirely (v0.8)",
+    )
+    ingest_external_parser.add_argument(
+        "--explain-suppress",
+        action="store_true",
+        help="Print suppression decisions for each suppressed item (v0.8)",
+    )
     ingest_external_parser.set_defaults(func=cmd_ingest_external)
     
     # run command
@@ -579,6 +682,11 @@ def main() -> None:
         type=str,
         default="24h",
         help="Time window: 24h, 72h, or 7d (default: 24h)",
+    )
+    run_parser.add_argument(
+        "--no-suppress",
+        action="store_true",
+        help="Bypass suppression entirely (v0.8)",
     )
     run_parser.set_defaults(func=cmd_run)
     

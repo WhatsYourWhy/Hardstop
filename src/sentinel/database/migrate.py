@@ -173,3 +173,51 @@ def ensure_trust_tier_columns(sqlite_path: str) -> None:
     finally:
         conn.close()
 
+
+def ensure_suppression_columns(sqlite_path: str) -> None:
+    """
+    Add suppression columns if missing (v0.8).
+    
+    Adds to raw_items:
+    - suppression_status
+    - suppression_primary_rule_id
+    - suppression_rule_ids_json
+    - suppressed_at_utc
+    - suppression_stage
+    
+    Adds to events:
+    - suppression_primary_rule_id
+    - suppression_rule_ids_json
+    - suppressed_at_utc
+    
+    Args:
+        sqlite_path: Path to SQLite database file
+    """
+    conn = sqlite3.connect(sqlite_path)
+    try:
+        # Add to raw_items
+        raw_items_additions: List[Tuple[str, str]] = [
+            ("suppression_status", "TEXT"),
+            ("suppression_primary_rule_id", "TEXT"),
+            ("suppression_rule_ids_json", "TEXT"),
+            ("suppressed_at_utc", "TEXT"),
+            ("suppression_stage", "TEXT"),
+        ]
+        for col, coltype in raw_items_additions:
+            if not _column_exists(conn, "raw_items", col):
+                conn.execute(f"ALTER TABLE raw_items ADD COLUMN {col} {coltype};")
+        
+        # Add to events
+        events_additions: List[Tuple[str, str]] = [
+            ("suppression_primary_rule_id", "TEXT"),
+            ("suppression_rule_ids_json", "TEXT"),
+            ("suppressed_at_utc", "TEXT"),
+        ]
+        for col, coltype in events_additions:
+            if not _column_exists(conn, "events", col):
+                conn.execute(f"ALTER TABLE events ADD COLUMN {col} {coltype};")
+        
+        conn.commit()
+    finally:
+        conn.close()
+

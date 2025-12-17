@@ -70,6 +70,13 @@ class RawItem(Base):
     status = Column(String, nullable=False, default="NEW")  # NEW, NORMALIZED, FAILED
     error = Column(Text, nullable=True)
     trust_tier = Column(Integer, nullable=True)  # v0.7: 1|2|3 (default 2)
+    
+    # v0.8: Suppression metadata
+    suppression_status = Column(String, nullable=True)  # SUPPRESSED or null
+    suppression_primary_rule_id = Column(String, nullable=True)
+    suppression_rule_ids_json = Column(Text, nullable=True)  # JSON array of matched rule IDs
+    suppressed_at_utc = Column(String, nullable=True)  # ISO 8601 string
+    suppression_stage = Column(String, nullable=True)  # e.g., INGEST_EXTERNAL
 
 
 class Event(Base):
@@ -92,6 +99,11 @@ class Event(Base):
     entities_json = Column(Text, nullable=True)  # v0.6: extracted entities as JSON
     event_payload_json = Column(Text, nullable=True)  # v0.6: normalized event as JSON
     trust_tier = Column(Integer, nullable=True)  # v0.7: 1|2|3 (default 2)
+    
+    # v0.8: Suppression metadata
+    suppression_primary_rule_id = Column(String, nullable=True)
+    suppression_rule_ids_json = Column(Text, nullable=True)  # JSON array of matched rule IDs
+    suppressed_at_utc = Column(String, nullable=True)  # ISO 8601 string
 
 
 class Alert(Base):

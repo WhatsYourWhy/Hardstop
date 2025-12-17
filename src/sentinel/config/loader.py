@@ -5,6 +5,7 @@ import yaml
 
 DEFAULT_CONFIG_PATH = Path("sentinel.config.yaml")
 DEFAULT_SOURCES_PATH = Path("config/sources.yaml")
+DEFAULT_SUPPRESSION_PATH = Path("config/suppression.yaml")
 
 
 def load_config(path: Path | None = None) -> Dict[str, Any]:
@@ -128,4 +129,57 @@ def get_source_with_defaults(source: Dict[str, Any]) -> Dict[str, Any]:
         result["weighting_bias"] = 0
     
     return result
+
+
+def load_suppression_config(path: Path | None = None) -> Dict[str, Any]:
+    """
+    Load suppression configuration from YAML file.
+    
+    Args:
+        path: Optional path to suppression.yaml file. Defaults to config/suppression.yaml
+        
+    Returns:
+        Dictionary with suppression configuration
+        
+    Raises:
+        FileNotFoundError: If suppression config file doesn't exist
+        ValueError: If config structure is invalid
+    """
+    cfg_path = path or DEFAULT_SUPPRESSION_PATH
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"Suppression config file not found: {cfg_path}")
+    
+    with cfg_path.open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    
+    # Validate structure
+    if not isinstance(config, dict):
+        raise ValueError("Suppression config must be a dictionary")
+    if "version" not in config:
+        raise ValueError("Suppression config must have 'version' field")
+    
+    # enabled defaults to True if not present
+    if "enabled" not in config:
+        config["enabled"] = True
+    
+    # rules defaults to empty list if not present
+    if "rules" not in config:
+        config["rules"] = []
+    elif not isinstance(config["rules"], list):
+        raise ValueError("Suppression config 'rules' must be a list")
+    
+    return config
+
+
+def get_suppression_rules_for_source(source: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Extract suppression rules from a source config.
+    
+    Args:
+        source: Source dictionary from config
+        
+    Returns:
+        List of suppression rule dictionaries (empty list if none)
+    """
+    return source.get("suppress", [])
 

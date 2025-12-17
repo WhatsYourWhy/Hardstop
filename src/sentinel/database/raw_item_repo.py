@@ -96,6 +96,7 @@ def get_raw_items_for_ingest(
     min_tier: Optional[str] = None,
     source_id: Optional[str] = None,
     since_hours: Optional[int] = None,
+    include_suppressed: bool = False,
 ) -> List[RawItem]:
     """
     Get raw items with NEW status for ingestion.
@@ -106,11 +107,18 @@ def get_raw_items_for_ingest(
         min_tier: Minimum tier (global > regional > local). None = all tiers.
         source_id: Filter by specific source ID. None = all sources.
         since_hours: Only get items fetched within this many hours. None = all.
+        include_suppressed: Whether to include suppressed items (default False)
         
     Returns:
         List of RawItem rows
     """
     query = session.query(RawItem).filter(RawItem.status == "NEW")
+    
+    # Filter out suppressed items by default (v0.8)
+    if not include_suppressed:
+        query = query.filter(
+            (RawItem.suppression_status.is_(None)) | (RawItem.suppression_status != "SUPPRESSED")
+        )
     
     # Filter by source
     if source_id:
@@ -182,4 +190,38 @@ def mark_raw_item_status(
 def get_raw_item_by_id(session: Session, raw_id: str) -> Optional[RawItem]:
     """Get raw item by ID."""
     return session.query(RawItem).filter(RawItem.raw_id == raw_id).first()
+
+
+def mark_raw_item_suppressed(
+    session: Session,
+    raw_id: str,
+    primary_rule_id: str,
+    matched_rule_ids: List[str],
+    suppressed_at_utc: str,
+    stage: str,
+) -> None:
+    """
+    Mark a raw item as suppressed with rule metadata.
+    
+    Args:
+        session: SQLAlchemy session
+        raw_id: Raw item ID
+        primary_rule_id: First matching rule ID
+        matched_rule_ids: All matching rule IDs
+        suppressed_at_utc: ISO 8601 timestamp when suppressed
+        stage: Stage where suppression occurred (e.g., "INGEST_EXTERNAL")
+    """
+    raw_item = session.query(RawItem).filter(RawItem.raw_id == raw_id).first()
+    if not raw_item:
+        logger.warning(f"Raw item not found: {raw_id}")
+        return
+    
+    raw_item.suppression_status = "SUPPRESSED"
+    raw_item.suppression_primary_rule_id = primary_rule_id
+    raw_item.suppression_rule_ids_json = json.dumps(matched_rule_ids)
+    raw_item.suppressed_at_utc = suppressed_at_utc
+    raw_item.suppression_stage = stage
+    
+    session.add(raw_item)
+    logger.debug(f"Marked raw item {raw_id} as suppressed (rule: {primary_rule_id})")
 

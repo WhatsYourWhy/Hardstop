@@ -1,13 +1,13 @@
 """Daily brief generation for Sentinel alerts."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from ..database.alert_repo import query_recent_alerts
-from ..database.schema import Alert
+from ..database.schema import Alert, RawItem
 
 
 def _parse_since(since_str: str) -> int:
@@ -133,6 +133,36 @@ def generate_brief(
         "unknown": len([a for a in alert_dicts if a.get("tier") is None]),  # Handle None tier
     }
     
+    # v0.8: Query suppressed items
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    cutoff_iso = cutoff.isoformat()
+    
+    suppressed_query = session.query(RawItem).filter(
+        RawItem.suppression_status == "SUPPRESSED",
+        RawItem.suppressed_at_utc >= cutoff_iso,
+    )
+    suppressed_items = suppressed_query.all()
+    suppressed_count = len(suppressed_items)
+    
+    # Calculate suppressed by rule (top N)
+    suppressed_by_rule: Dict[str, int] = {}
+    suppressed_by_source: Dict[str, int] = {}
+    for item in suppressed_items:
+        if item.suppression_primary_rule_id:
+            suppressed_by_rule[item.suppression_primary_rule_id] = suppressed_by_rule.get(item.suppression_primary_rule_id, 0) + 1
+        if item.source_id:
+            suppressed_by_source[item.source_id] = suppressed_by_source.get(item.source_id, 0) + 1
+    
+    # Sort and take top 5
+    suppressed_by_rule_list = [
+        {"rule_id": rule_id, "count": count}
+        for rule_id, count in sorted(suppressed_by_rule.items(), key=lambda x: x[1], reverse=True)[:5]
+    ]
+    suppressed_by_source_list = [
+        {"source_id": source_id, "count": count}
+        for source_id, count in sorted(suppressed_by_source.items(), key=lambda x: x[1], reverse=True)[:5]
+    ]
+    
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "since": f"{since_hours}h",
@@ -145,7 +175,12 @@ def generate_brief(
         "top": top_impact,
         "updated": updated[:limit],
         "created": created[:limit],
-        "suppressed": {
+        "suppressed": {  # v0.8: suppression reporting
+            "count": suppressed_count,
+            "by_rule": suppressed_by_rule_list,
+            "by_source": suppressed_by_source_list,
+        },
+        "suppressed_legacy": {  # Keep for backward compatibility
             "total_queried": len(alerts),
             "limit_applied": limit,
         },
@@ -187,6 +222,17 @@ def render_markdown(brief_data: Dict) -> str:
         lines.append(f"- **Tier:** {' | '.join(tier_summary_parts)}")
     else:
         lines.append("- **Tier:** None")
+    
+    # v0.8: Suppressed count
+    suppressed = brief_data.get("suppressed", {})
+    suppressed_count = suppressed.get("count", 0)
+    if suppressed_count > 0:
+        suppressed_by_rule = suppressed.get("by_rule", [])
+        if suppressed_by_rule:
+            top_rules = ", ".join([f"{r['rule_id']}={r['count']}" for r in suppressed_by_rule[:3]])
+            lines.append(f"- **Suppressed:** {suppressed_count} (top: {top_rules})")
+        else:
+            lines.append(f"- **Suppressed:** {suppressed_count}")
     lines.append("")
     
     # Quiet Day - check early

@@ -100,6 +100,13 @@ tiers:
       weighting_bias: 0
       # USCG Local Notices to Mariners (District 1) via GovDelivery RSS
       # Official source: https://www.navcen.uscg.gov/subscribe-email-rss-feeds
+      suppress:
+        - id: uscg_routine_nav_notice
+          kind: keyword
+          field: title
+          pattern: "weekly summary"
+          case_sensitive: false
+          note: "Routine weekly digest; too chatty"
 
   local:
     - id: navcen_news_notices

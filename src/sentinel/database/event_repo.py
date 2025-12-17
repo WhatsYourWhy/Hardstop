@@ -1,7 +1,7 @@
 """Repository for events table operations."""
 
 import json
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -11,13 +11,22 @@ from sentinel.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def save_event(session: Session, event: Dict) -> Event:
+def save_event(
+    session: Session,
+    event: Dict,
+    suppression_primary_rule_id: Optional[str] = None,
+    suppression_rule_ids: Optional[List[str]] = None,
+    suppressed_at_utc: Optional[str] = None,
+) -> Event:
     """
     Save normalized event to database.
     
     Args:
         session: SQLAlchemy session
         event: Normalized event dict
+        suppression_primary_rule_id: Optional primary suppression rule ID (v0.8)
+        suppression_rule_ids: Optional list of matched suppression rule IDs (v0.8)
+        suppressed_at_utc: Optional ISO 8601 timestamp when suppressed (v0.8)
         
     Returns:
         Event row
@@ -31,6 +40,11 @@ def save_event(session: Session, event: Dict) -> Event:
     if existing:
         logger.debug(f"Event already exists: {event_id}")
         return existing
+    
+    # Prepare suppression metadata
+    suppression_rule_ids_json = None
+    if suppression_rule_ids:
+        suppression_rule_ids_json = json.dumps(suppression_rule_ids)
     
     # Create new event
     event_row = Event(
@@ -51,6 +65,9 @@ def save_event(session: Session, event: Dict) -> Event:
         entities_json=event.get("entities_json"),
         event_payload_json=event.get("event_payload_json"),
         trust_tier=event.get("trust_tier"),  # v0.7: store trust_tier
+        suppression_primary_rule_id=suppression_primary_rule_id,  # v0.8: suppression metadata
+        suppression_rule_ids_json=suppression_rule_ids_json,
+        suppressed_at_utc=suppressed_at_utc,
     )
     
     session.add(event_row)

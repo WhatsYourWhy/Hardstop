@@ -1,0 +1,18 @@
+version: 1
+enabled: true
+
+rules:
+  - id: global_test_alerts
+    kind: keyword
+    field: any
+    pattern: "test alert"
+    case_sensitive: false
+    note: "Common noise across multiple feeds"
+
+  - id: global_training_notice
+    kind: keyword
+    field: any
+    pattern: "training exercise"
+    case_sensitive: false
+    note: "Training exercises are not real alerts"
+
