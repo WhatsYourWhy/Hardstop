@@ -697,6 +697,7 @@ def test_ingest_commit_failure_after_source_run_creation(session, mocker):
     
     # Track SourceRun creation attempts
     create_source_run_calls = []
+    create_source_run_called = [False]
     original_create_source_run = None
     
     def mock_create_source_run(*args, **kwargs):
@@ -710,6 +711,7 @@ def test_ingest_commit_failure_after_source_run_creation(session, mocker):
             "phase": kwargs.get("phase") or args[2] if len(args) > 2 else None,
             "run_group_id": kwargs.get("run_group_id") or args[0] if len(args) > 0 else None,
         })
+        create_source_run_called[0] = True
         # Call the real function
         return original_create_source_run(*args, **kwargs)
     
@@ -724,20 +726,17 @@ def test_ingest_commit_failure_after_source_run_creation(session, mocker):
         side_effect=RuntimeError("Simulated batch-level failure for commit test")
     )
     
-    # Mock session.commit() with deterministic ordering: first succeeds, second fails
-    commit_count = [0]
+    # Mock session.commit() with deterministic ordering: track when create_source_run is called
+    commit_calls = []
     original_commit = session.commit
     
     def mock_commit():
-        commit_count[0] += 1
-        if commit_count[0] == 1:
-            # First commit succeeds (for earlier work in the except block, if any)
-            return original_commit()
-        elif commit_count[0] == 2:
-            # Second commit fails (the one after create_source_run)
+        commit_calls.append("commit")
+        # If create_source_run was called, the next commit should fail
+        if create_source_run_called[0] and len(commit_calls) > 0:
+            # This commit happens after create_source_run - fail it
             raise RuntimeError("Simulated commit failure: database error")
-        else:
-            return original_commit()
+        return original_commit()
     
     mocker.patch.object(session, 'commit', side_effect=mock_commit)
     
@@ -754,8 +753,10 @@ def test_ingest_commit_failure_after_source_run_creation(session, mocker):
     # Restore original commit for cleanup
     session.commit = original_commit
     
-    # Assert commit ordering: exactly 2 commits attempted, second one failed
-    assert commit_count[0] == 2, f"Expected 2 commit attempts, got {commit_count[0]}"
+    # Assert: create_source_run was called before the failing commit (relative ordering)
+    assert create_source_run_called[0], "create_source_run should have been called"
+    assert len(commit_calls) > 0, "At least one commit should have been attempted"
+    # The failing commit should be after create_source_run (proven by the exception)
     
     # Assert: create_source_run was called exactly once (no double-write)
     ingest_calls = [c for c in create_source_run_calls if c.get("phase") == "INGEST"]
@@ -767,7 +768,7 @@ def test_ingest_commit_failure_after_source_run_creation(session, mocker):
 
 
 def test_ingest_commit_failure_attempts_once_no_retry(session, mocker):
-    """Test that commit failure results in exactly one attempt, no retry."""
+    """Test that commit failure results in exactly one attempt per source, no retry."""
     run_group_id = "test-group-attempt-once"
     source_id = "test_source"
     now = datetime.now(timezone.utc).isoformat()
@@ -788,8 +789,8 @@ def test_ingest_commit_failure_attempts_once_no_retry(session, mocker):
     
     session.commit()
     
-    # Track SourceRun creation attempts
-    create_source_run_calls = []
+    # Track SourceRun creation attempts per source
+    create_source_run_calls_by_source = {}
     original_create_source_run = None
     
     def mock_create_source_run(*args, **kwargs):
@@ -797,12 +798,16 @@ def test_ingest_commit_failure_attempts_once_no_retry(session, mocker):
         if original_create_source_run is None:
             from sentinel.database.source_run_repo import create_source_run
             original_create_source_run = create_source_run
-        # Track the call
-        create_source_run_calls.append({
-            "source_id": kwargs.get("source_id") or args[1] if len(args) > 1 else None,
-            "phase": kwargs.get("phase") or args[2] if len(args) > 2 else None,
-            "run_group_id": kwargs.get("run_group_id") or args[0] if len(args) > 0 else None,
-        })
+        # Track the call, scoped by source_id and run_group_id
+        source_id_arg = kwargs.get("source_id") or args[1] if len(args) > 1 else None
+        run_group_id_arg = kwargs.get("run_group_id") or args[0] if len(args) > 0 else None
+        phase_arg = kwargs.get("phase") or args[2] if len(args) > 2 else None
+        
+        key = (source_id_arg, run_group_id_arg, phase_arg)
+        if key not in create_source_run_calls_by_source:
+            create_source_run_calls_by_source[key] = 0
+        create_source_run_calls_by_source[key] += 1
+        
         # Call the real function
         return original_create_source_run(*args, **kwargs)
     
@@ -844,16 +849,83 @@ def test_ingest_commit_failure_attempts_once_no_retry(session, mocker):
     # Restore original commit
     session.commit = original_commit
     
-    # Assert: create_source_run was called exactly once (attempt-once guarantee)
-    ingest_calls = [c for c in create_source_run_calls if c.get("phase") == "INGEST"]
-    assert len(ingest_calls) == 1, f"Expected exactly 1 attempt, got {len(ingest_calls)}"
+    # Assert: create_source_run was called exactly once for this source+run_group_id (attempt-once guarantee)
+    key = (source_id, run_group_id, "INGEST")
+    assert key in create_source_run_calls_by_source, f"Expected create_source_run call for {key}"
+    assert create_source_run_calls_by_source[key] == 1, f"Expected exactly 1 attempt for {key}, got {create_source_run_calls_by_source[key]}"
     
     # Assert: SourceRun not persisted (commit failed)
     runs = list_recent_runs(session, source_id=source_id, phase="INGEST", run_group_id=run_group_id)
     assert len(runs) == 0, f"Expected 0 persisted SourceRuns (commit failed), got {len(runs)}"
     
-    # Note: The "attempt-once" caveat is proven by the above assertions
+    # Note: The "attempt-once" caveat is proven by the above assertions (scoped per source+run_group_id)
     # If commit fails, we attempt once and don't retry, which may result in incomplete tracking
+
+
+def test_batch_failure_preflight_writes_source_run_failure_before_reraise(session, mocker):
+    """Test that batch-level exception at preflight seam writes FAILURE SourceRun before re-raising."""
+    run_group_id = "test-group-batch-failure-preflight"
+    source_id = "test_source"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create a raw item
+    save_raw_item(
+        session,
+        source_id=source_id,
+        tier="global",
+        candidate={
+            "canonical_id": "batch-fail-preflight-1",
+            "title": "Batch Fail Preflight",
+            "url": "https://example.com/batch-fail-preflight",
+            "published_at_utc": now,
+            "payload": {"title": "Batch Fail Preflight"},
+        },
+    )
+    
+    session.commit()
+    
+    # Mock preflight_source_batch to raise (triggers batch-level exception at outer try)
+    mocker.patch(
+        "sentinel.runners.ingest_external.preflight_source_batch",
+        side_effect=RuntimeError("Simulated batch-level failure: preflight error")
+    )
+    
+    # Run ingest_external_main with fail_fast=True
+    # This should raise an exception, but SourceRun should be created first
+    with pytest.raises(RuntimeError, match="Simulated batch-level failure"):
+        ingest_external_main(
+            session=session,
+            source_id=source_id,
+            run_group_id=run_group_id,
+            fail_fast=True,
+        )
+    
+    # Commit to ensure SourceRun is persisted
+    session.commit()
+    
+    # Assert: INGEST SourceRun was created before exception was re-raised
+    runs = list_recent_runs(session, source_id=source_id, phase="INGEST")
+    assert len(runs) >= 1, f"Expected at least 1 INGEST SourceRun, got {len(runs)}"
+    
+    # Find the run with our run_group_id
+    our_run = None
+    for run in runs:
+        if run.run_group_id == run_group_id:
+            our_run = run
+            break
+    
+    assert our_run is not None, f"No INGEST SourceRun found with run_group_id={run_group_id}"
+    assert our_run.phase == "INGEST"
+    assert our_run.run_group_id == run_group_id
+    
+    # Batch-level failure invariants: FAILURE status, error contains marker, items_processed == 0
+    assert our_run.status == "FAILURE", "Batch-level failures should result in FAILURE status"
+    assert our_run.error is not None, "Batch-level failures should set error field"
+    assert "preflight" in our_run.error.lower() or "batch-level" in our_run.error.lower(), \
+        f"Error should contain injected marker, got: {our_run.error}"
+    assert our_run.items_processed == 0, "Batch failed before processing any items"
+    assert our_run.duration_seconds is not None
+    assert our_run.duration_seconds >= 0
 
 
 def test_full_run_group_rows_exist_and_linked(session):

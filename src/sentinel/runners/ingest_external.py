@@ -33,6 +33,29 @@ from sentinel.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def preflight_source_batch(source_id: str, source_items: List) -> None:
+    """
+    Preflight checks for a source batch before processing items.
+    
+    Validates that the source batch is ready for processing. This provides a stable
+    seam for batch-level failure injection in tests while performing real validation.
+    
+    Args:
+        source_id: Source ID being processed
+        source_items: List of raw items for this source
+        
+    Raises:
+        ValueError: If source_id is empty or source_items is invalid
+    """
+    if not source_id or not source_id.strip():
+        raise ValueError(f"Invalid source_id: {source_id}")
+    
+    if not isinstance(source_items, (list, tuple)):
+        raise ValueError(f"source_items must be a list or tuple, got {type(source_items)}")
+    
+    # Note: Empty lists are valid (source has no items to process)
+
+
 def main(
     session: Session,
     limit: Optional[int] = None,
@@ -140,6 +163,9 @@ def main(
         # but don't change batch status unless all items fail or batch-level exception occurs.
         # Wrap entire source batch in try/except to guarantee INGEST SourceRun row (v1.0)
         try:
+            # Preflight checks (provides stable seam for batch-level failure injection)
+            preflight_source_batch(source_id, source_items)
+            
             for raw_item in source_items:
                 try:
                     # Parse raw payload
