@@ -496,76 +496,70 @@ def test_ingest_batch_failure_fail_fast_writes_source_run(session, mocker):
     assert our_run.duration_seconds >= 0
 
 
-def test_ingest_batch_failure_non_db_fail_fast_writes_source_run(session, mocker):
-    """Test that non-DB batch-level exception with fail-fast writes SourceRun before re-raising (v1.0)."""
-    run_group_id = "test-group-batch-fail-fast-non-db"
+def test_item_failure_normalize_contained_and_source_run_success(session, mocker):
+    """Test that item-level failure at normalize is contained and writes SUCCESS SourceRun."""
+    run_group_id = "test-group-item-failure-normalize"
     source_id = "test_source"
     now = datetime.now(timezone.utc).isoformat()
     
-    # Create a raw item
+    # Create two raw items: one will fail at normalize, one will succeed
     save_raw_item(
         session,
         source_id=source_id,
         tier="global",
         candidate={
-            "canonical_id": "batch-fail-item-1",
-            "title": "Batch Fail Item",
-            "url": "https://example.com/batch-fail",
+            "canonical_id": "item-fail-1",
+            "title": "Item Fail 1",
+            "url": "https://example.com/fail1",
             "published_at_utc": now,
-            "payload": {"title": "Batch Fail Item"},
+            "payload": {"title": "Item Fail 1"},
+        },
+    )
+    save_raw_item(
+        session,
+        source_id=source_id,
+        tier="global",
+        candidate={
+            "canonical_id": "item-success-1",
+            "title": "Item Success 1",
+            "url": "https://example.com/success1",
+            "published_at_utc": now,
+            "payload": {"title": "Item Success 1"},
         },
     )
     
     session.commit()
     
-    # To get a batch-level exception inside per-source try, the iteration itself must fail.
-    # Since everything in per-source try is inside the item loop, we need to make the iteration raise.
-    # Mock defaultdict.__getitem__ to return a FailingIterator for the first source.
-    # This is slightly implementation-dependent but tests a valid scenario: iteration failure.
-    from collections import defaultdict
-    
-    class FailingIterator:
-        """Iterator that raises when iterated - simulates batch-level failure during iteration."""
-        def __init__(self, items):
-            self._items = list(items)
-            self._raised = False
-        
-        def __iter__(self):
-            if not self._raised:
-                self._raised = True
-                raise RuntimeError("Simulated batch-level failure: iteration error")
-            return iter(self._items)
-        
-        def append(self, item):
-            self._items.append(item)
-    
-    # Mock defaultdict.__getitem__ to return FailingIterator for first source
+    # Mock normalize_external_event to raise on first call, then behave normally (raise-once pattern)
     call_count = [0]
-    original_defaultdict_getitem = defaultdict.__getitem__
+    original_normalize = None
     
-    def mock_defaultdict_getitem(self, key):
-        result = original_defaultdict_getitem(self, key)
+    def mock_normalize(*args, **kwargs):
+        nonlocal original_normalize
+        if original_normalize is None:
+            from sentinel.parsing.normalizer import normalize_external_event
+            original_normalize = normalize_external_event
         call_count[0] += 1
-        if call_count[0] == 1:  # First source accessed - wrap in FailingIterator
-            return FailingIterator(result)
-        return result
+        if call_count[0] == 1:  # First call raises
+            raise RuntimeError("Simulated normalization error for testing")
+        # Subsequent calls behave normally
+        return original_normalize(*args, **kwargs)
     
-    mocker.patch.object(defaultdict, '__getitem__', mock_defaultdict_getitem)
+    mocker.patch(
+        "sentinel.runners.ingest_external.normalize_external_event",
+        side_effect=mock_normalize
+    )
     
-    # Run ingest_external_main with fail_fast=True
-    # This should raise an exception, but SourceRun should be created first
-    with pytest.raises(RuntimeError, match="Simulated batch-level failure"):
-        ingest_external_main(
-            session=session,
-            source_id=source_id,
-            run_group_id=run_group_id,
-            fail_fast=True,
-        )
-    
-    # Commit to ensure SourceRun is persisted
+    # Run ingest_external_main (fail_fast=False to allow batch to complete)
+    stats = ingest_external_main(
+        session=session,
+        source_id=source_id,
+        run_group_id=run_group_id,
+        fail_fast=False,
+    )
     session.commit()
     
-    # Assert: INGEST SourceRun was created before exception was re-raised
+    # Assert: INGEST SourceRun was created with SUCCESS status (item failure contained)
     runs = list_recent_runs(session, source_id=source_id, phase="INGEST")
     assert len(runs) >= 1, f"Expected at least 1 INGEST SourceRun, got {len(runs)}"
     
@@ -579,19 +573,108 @@ def test_ingest_batch_failure_non_db_fail_fast_writes_source_run(session, mocker
     assert our_run is not None, f"No INGEST SourceRun found with run_group_id={run_group_id}"
     assert our_run.phase == "INGEST"
     assert our_run.run_group_id == run_group_id
-    # Status should be FAILURE (batch-level exception occurred during iteration)
-    assert our_run.status == "FAILURE"
-    assert our_run.error is not None
-    assert "failure" in our_run.error.lower() or "iteration" in our_run.error.lower() or "error" in our_run.error.lower()
-    # Duration should be set (proves SourceRun was created)
-    assert our_run.duration_seconds is not None
-    assert our_run.duration_seconds >= 0
-    # Items processed should be 0 (batch failed before processing any items)
-    assert our_run.items_processed == 0
+    
+    # Item-level failure invariant: SUCCESS status, no error field, source_errors > 0
+    assert our_run.status == "SUCCESS", "Item-level failures should result in SUCCESS status"
+    assert our_run.error is None or our_run.error == "", "Item-level failures should not set error field (only batch failures do)"
+    assert our_run.items_processed >= 1, "At least one item should have been processed"
+    assert our_run.items_events_created >= 1, "At least one event should have been created (the successful item)"
+    
+    # Verify stats reflect the failure
+    assert stats["errors"] >= 1, "Stats should reflect at least one error"
+    assert stats["processed"] >= 1, "Stats should reflect at least one processed item"
 
 
-def test_ingest_commit_failure_does_not_double_write_source_run(session, mocker):
-    """Test that commit failure does not set source_run_written and does not cause duplicate SourceRun (v1.0)."""
+def test_item_failure_save_event_contained_and_source_run_success(session, mocker):
+    """Test that item-level failure at save_event is contained and writes SUCCESS SourceRun."""
+    run_group_id = "test-group-item-failure-save-event"
+    source_id = "test_source"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create two raw items: one will fail at save_event, one will succeed
+    save_raw_item(
+        session,
+        source_id=source_id,
+        tier="global",
+        candidate={
+            "canonical_id": "item-fail-save-1",
+            "title": "Item Fail Save 1",
+            "url": "https://example.com/failsave1",
+            "published_at_utc": now,
+            "payload": {"title": "Item Fail Save 1"},
+        },
+    )
+    save_raw_item(
+        session,
+        source_id=source_id,
+        tier="global",
+        candidate={
+            "canonical_id": "item-success-save-1",
+            "title": "Item Success Save 1",
+            "url": "https://example.com/successsave1",
+            "published_at_utc": now,
+            "payload": {"title": "Item Success Save 1"},
+        },
+    )
+    
+    session.commit()
+    
+    # Mock save_event to raise on first call, then behave normally (raise-once pattern)
+    call_count = [0]
+    original_save_event = None
+    
+    def mock_save_event(*args, **kwargs):
+        nonlocal original_save_event
+        if original_save_event is None:
+            from sentinel.database.event_repo import save_event
+            original_save_event = save_event
+        call_count[0] += 1
+        if call_count[0] == 1:  # First call raises
+            raise RuntimeError("Simulated save_event error for testing")
+        # Subsequent calls behave normally
+        return original_save_event(*args, **kwargs)
+    
+    mocker.patch(
+        "sentinel.runners.ingest_external.save_event",
+        side_effect=mock_save_event
+    )
+    
+    # Run ingest_external_main (fail_fast=False to allow batch to complete)
+    stats = ingest_external_main(
+        session=session,
+        source_id=source_id,
+        run_group_id=run_group_id,
+        fail_fast=False,
+    )
+    session.commit()
+    
+    # Assert: INGEST SourceRun was created with SUCCESS status (item failure contained)
+    runs = list_recent_runs(session, source_id=source_id, phase="INGEST")
+    assert len(runs) >= 1, f"Expected at least 1 INGEST SourceRun, got {len(runs)}"
+    
+    # Find the run with our run_group_id
+    our_run = None
+    for run in runs:
+        if run.run_group_id == run_group_id:
+            our_run = run
+            break
+    
+    assert our_run is not None, f"No INGEST SourceRun found with run_group_id={run_group_id}"
+    assert our_run.phase == "INGEST"
+    assert our_run.run_group_id == run_group_id
+    
+    # Item-level failure invariant: SUCCESS status, no error field, source_errors > 0
+    assert our_run.status == "SUCCESS", "Item-level failures should result in SUCCESS status"
+    assert our_run.error is None or our_run.error == "", "Item-level failures should not set error field (only batch failures do)"
+    assert our_run.items_processed >= 1, "At least one item should have been processed"
+    
+    # Verify stats reflect the failure
+    assert stats["errors"] >= 1, "Stats should reflect at least one error"
+    assert stats["processed"] >= 1, "Stats should reflect at least one processed item"
+
+
+def test_ingest_commit_failure_after_source_run_creation(session, mocker):
+    """Test that commit failure after SourceRun creation prevents persistence but doesn't double-write."""
     run_group_id = "test-group-commit-failure"
     source_id = "test_source"
     now = datetime.now(timezone.utc).isoformat()
@@ -635,52 +718,28 @@ def test_ingest_commit_failure_does_not_double_write_source_run(session, mocker)
         side_effect=mock_create_source_run
     )
     
-    # Mock session.commit() to fail on the commit after create_source_run in except block
+    # Mock save_event to raise (triggers batch exception, reaches except block)
+    mocker.patch(
+        "sentinel.runners.ingest_external.save_event",
+        side_effect=RuntimeError("Simulated batch-level failure for commit test")
+    )
+    
+    # Mock session.commit() with deterministic ordering: first succeeds, second fails
     commit_count = [0]
-    create_source_run_count = [0]
     original_commit = session.commit
     
     def mock_commit():
         commit_count[0] += 1
-        # Fail on the commit that happens after create_source_run in the except block
-        # We detect this by checking if we've created a SourceRun and this is the commit after it
-        if len(create_source_run_calls) > 0 and commit_count[0] == len(create_source_run_calls):
-            # This is the commit after a SourceRun creation - fail it
+        if commit_count[0] == 1:
+            # First commit succeeds (for earlier work in the except block, if any)
+            return original_commit()
+        elif commit_count[0] == 2:
+            # Second commit fails (the one after create_source_run)
             raise RuntimeError("Simulated commit failure: database error")
-        return original_commit()
+        else:
+            return original_commit()
     
     mocker.patch.object(session, 'commit', side_effect=mock_commit)
-    
-    # Cause a batch-level exception so we hit the except block where SourceRun is created
-    # Use iteration failure (same approach as non-DB test) to trigger batch-level exception
-    from collections import defaultdict
-    
-    class FailingIterator:
-        """Iterator that raises when iterated."""
-        def __init__(self, items):
-            self._items = list(items)
-            self._raised = False
-        
-        def __iter__(self):
-            if not self._raised:
-                self._raised = True
-                raise RuntimeError("Simulated batch-level failure for commit test")
-            return iter(self._items)
-        
-        def append(self, item):
-            self._items.append(item)
-    
-    iter_call_count = [0]
-    original_defaultdict_getitem = defaultdict.__getitem__
-    
-    def mock_defaultdict_getitem_iter(self, key):
-        result = original_defaultdict_getitem(self, key)
-        iter_call_count[0] += 1
-        if iter_call_count[0] == 1:  # First source - return FailingIterator
-            return FailingIterator(result)
-        return result
-    
-    mocker.patch.object(defaultdict, '__getitem__', mock_defaultdict_getitem_iter)
     
     # Run ingest_external_main with fail_fast=False
     # The commit failure should propagate, but source_run_written should not be set
@@ -695,14 +754,280 @@ def test_ingest_commit_failure_does_not_double_write_source_run(session, mocker)
     # Restore original commit for cleanup
     session.commit = original_commit
     
+    # Assert commit ordering: exactly 2 commits attempted, second one failed
+    assert commit_count[0] == 2, f"Expected 2 commit attempts, got {commit_count[0]}"
+    
     # Assert: create_source_run was called exactly once (no double-write)
-    # The flag source_run_written should prevent a second attempt
     ingest_calls = [c for c in create_source_run_calls if c.get("phase") == "INGEST"]
     assert len(ingest_calls) == 1, f"Expected 1 INGEST SourceRun creation attempt, got {len(ingest_calls)}"
     
     # Assert: The SourceRun was not persisted (commit failed)
     runs = list_recent_runs(session, source_id=source_id, phase="INGEST", run_group_id=run_group_id)
-    # If commit failed, the SourceRun should not be in the database
-    # (This verifies that source_run_written was not set, so no duplicate attempt was made)
     assert len(runs) == 0, f"Expected 0 persisted SourceRuns (commit failed), got {len(runs)}"
+
+
+def test_ingest_commit_failure_attempts_once_no_retry(session, mocker):
+    """Test that commit failure results in exactly one attempt, no retry."""
+    run_group_id = "test-group-attempt-once"
+    source_id = "test_source"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create a raw item
+    save_raw_item(
+        session,
+        source_id=source_id,
+        tier="global",
+        candidate={
+            "canonical_id": "attempt-once-item-1",
+            "title": "Attempt Once Item",
+            "url": "https://example.com/attempt-once",
+            "published_at_utc": now,
+            "payload": {"title": "Attempt Once Item"},
+        },
+    )
+    
+    session.commit()
+    
+    # Track SourceRun creation attempts
+    create_source_run_calls = []
+    original_create_source_run = None
+    
+    def mock_create_source_run(*args, **kwargs):
+        nonlocal original_create_source_run
+        if original_create_source_run is None:
+            from sentinel.database.source_run_repo import create_source_run
+            original_create_source_run = create_source_run
+        # Track the call
+        create_source_run_calls.append({
+            "source_id": kwargs.get("source_id") or args[1] if len(args) > 1 else None,
+            "phase": kwargs.get("phase") or args[2] if len(args) > 2 else None,
+            "run_group_id": kwargs.get("run_group_id") or args[0] if len(args) > 0 else None,
+        })
+        # Call the real function
+        return original_create_source_run(*args, **kwargs)
+    
+    mocker.patch(
+        "sentinel.runners.ingest_external.create_source_run",
+        side_effect=mock_create_source_run
+    )
+    
+    # Mock save_event to raise (triggers batch exception, reaches except block)
+    mocker.patch(
+        "sentinel.runners.ingest_external.save_event",
+        side_effect=RuntimeError("Simulated batch-level failure for attempt-once test")
+    )
+    
+    # Mock session.commit() to fail on second commit (after create_source_run)
+    commit_count = [0]
+    original_commit = session.commit
+    
+    def mock_commit():
+        commit_count[0] += 1
+        if commit_count[0] == 1:
+            return original_commit()
+        elif commit_count[0] == 2:
+            raise RuntimeError("Simulated commit failure: database error")
+        else:
+            return original_commit()
+    
+    mocker.patch.object(session, 'commit', side_effect=mock_commit)
+    
+    # Run ingest_external_main
+    with pytest.raises(RuntimeError, match="Simulated commit failure"):
+        ingest_external_main(
+            session=session,
+            source_id=source_id,
+            run_group_id=run_group_id,
+            fail_fast=False,
+        )
+    
+    # Restore original commit
+    session.commit = original_commit
+    
+    # Assert: create_source_run was called exactly once (attempt-once guarantee)
+    ingest_calls = [c for c in create_source_run_calls if c.get("phase") == "INGEST"]
+    assert len(ingest_calls) == 1, f"Expected exactly 1 attempt, got {len(ingest_calls)}"
+    
+    # Assert: SourceRun not persisted (commit failed)
+    runs = list_recent_runs(session, source_id=source_id, phase="INGEST", run_group_id=run_group_id)
+    assert len(runs) == 0, f"Expected 0 persisted SourceRuns (commit failed), got {len(runs)}"
+    
+    # Note: The "attempt-once" caveat is proven by the above assertions
+    # If commit fails, we attempt once and don't retry, which may result in incomplete tracking
+
+
+def test_full_run_group_rows_exist_and_linked(session):
+    """Test that full run group creates linked INGEST SourceRuns per source."""
+    run_group_id = "test-run-group-full"
+    source1_id = "test_source_1"
+    source2_id = "test_source_2"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create raw items for two sources (insert directly via repo/session, no fetch)
+    save_raw_item(
+        session,
+        source_id=source1_id,
+        tier="global",
+        candidate={
+            "canonical_id": "run-group-item-1",
+            "title": "Run Group Item 1",
+            "url": "https://example.com/rungroup1",
+            "published_at_utc": now,
+            "payload": {"title": "Run Group Item 1"},
+        },
+    )
+    save_raw_item(
+        session,
+        source_id=source2_id,
+        tier="global",
+        candidate={
+            "canonical_id": "run-group-item-2",
+            "title": "Run Group Item 2",
+            "url": "https://example.com/rungroup2",
+            "published_at_utc": now,
+            "payload": {"title": "Run Group Item 2"},
+        },
+    )
+    
+    session.commit()
+    
+    # Run ingest_external_main
+    stats = ingest_external_main(
+        session=session,
+        source_id=None,  # Process all sources
+        run_group_id=run_group_id,
+        fail_fast=False,
+    )
+    session.commit()
+    
+    # Verify: Two INGEST SourceRuns exist
+    runs = list_recent_runs(session, phase="INGEST", run_group_id=run_group_id)
+    ingest_runs = [r for r in runs if r.run_group_id == run_group_id]
+    assert len(ingest_runs) == 2, f"Expected exactly 2 INGEST SourceRuns for run_group_id={run_group_id}, got {len(ingest_runs)}"
+    
+    # Find runs for each source
+    source1_run = None
+    source2_run = None
+    for run in ingest_runs:
+        if run.source_id == source1_id:
+            source1_run = run
+        elif run.source_id == source2_id:
+            source2_run = run
+    
+    assert source1_run is not None, f"No SourceRun found for {source1_id}"
+    assert source2_run is not None, f"No SourceRun found for {source2_id}"
+    
+    # Both should share same run_group_id
+    assert source1_run.run_group_id == run_group_id
+    assert source2_run.run_group_id == run_group_id
+    assert source1_run.run_group_id == source2_run.run_group_id
+    
+    # Counters should be sane
+    assert source1_run.items_processed >= 0
+    assert source2_run.items_processed >= 0
+    assert source1_run.items_processed is not None
+    assert source2_run.items_processed is not None
+    assert source1_run.items_events_created >= 0
+    assert source2_run.items_events_created >= 0
+
+
+def test_ingest_source_run_written_flag_resets_per_source(session, mocker):
+    """Test that source_run_written flag resets inside per-source loop, not above it."""
+    run_group_id = "test-group-flag-scoping"
+    source1_id = "test_source_1"
+    source2_id = "test_source_2"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create raw items for two sources (insert directly via repo/session, no fetch)
+    save_raw_item(
+        session,
+        source_id=source1_id,
+        tier="global",
+        candidate={
+            "canonical_id": "source1-item-1",
+            "title": "Source1 Item 1",
+            "url": "https://example.com/source1-1",
+            "published_at_utc": now,
+            "payload": {"title": "Source1 Item 1"},
+        },
+    )
+    save_raw_item(
+        session,
+        source_id=source2_id,
+        tier="global",
+        candidate={
+            "canonical_id": "source2-item-1",
+            "title": "Source2 Item 1",
+            "url": "https://example.com/source2-1",
+            "published_at_utc": now,
+            "payload": {"title": "Source2 Item 1"},
+        },
+    )
+    
+    session.commit()
+    
+    # Mock normalize_external_event to fail for source1 only (raise-once pattern)
+    call_count = [0]
+    original_normalize = None
+    
+    def mock_normalize(*args, **kwargs):
+        nonlocal original_normalize
+        if original_normalize is None:
+            from sentinel.parsing.normalizer import normalize_external_event
+            original_normalize = normalize_external_event
+        call_count[0] += 1
+        # Check if this is for source1 (first source processed)
+        # We'll fail on the first call, which should be source1's item
+        if call_count[0] == 1:
+            raise RuntimeError("Simulated item failure for source1")
+        # Subsequent calls (source2) behave normally
+        return original_normalize(*args, **kwargs)
+    
+    mocker.patch(
+        "sentinel.runners.ingest_external.normalize_external_event",
+        side_effect=mock_normalize
+    )
+    
+    # Run with fail_fast=False (critical: with fail_fast=True, first failure stops everything)
+    stats = ingest_external_main(
+        session=session,
+        source_id=None,  # Process all sources
+        run_group_id=run_group_id,
+        fail_fast=False,
+    )
+    session.commit()
+    
+    # Verify: exactly 2 INGEST SourceRuns exist for run_group_id
+    runs = list_recent_runs(session, phase="INGEST", run_group_id=run_group_id)
+    ingest_runs = [r for r in runs if r.run_group_id == run_group_id]
+    assert len(ingest_runs) == 2, f"Expected exactly 2 INGEST SourceRuns for run_group_id={run_group_id}, got {len(ingest_runs)}"
+    
+    # Find runs for each source
+    source1_run = None
+    source2_run = None
+    for run in ingest_runs:
+        if run.source_id == source1_id:
+            source1_run = run
+        elif run.source_id == source2_id:
+            source2_run = run
+    
+    assert source1_run is not None, f"No SourceRun found for {source1_id}"
+    assert source2_run is not None, f"No SourceRun found for {source2_id}"
+    
+    # Both should share same run_group_id
+    assert source1_run.run_group_id == run_group_id
+    assert source2_run.run_group_id == run_group_id
+    
+    # With item-level failure for source1, both should have SUCCESS status
+    # (source1 has source_errors > 0, but status is still SUCCESS because batch completed)
+    assert source1_run.status == "SUCCESS", "Item-level failure should result in SUCCESS status (batch completed)"
+    assert source2_run.status == "SUCCESS", "source2 should have SUCCESS status"
+    
+    # Counters should be sane
+    assert source1_run.items_processed >= 0
+    assert source2_run.items_processed >= 0
+    assert source1_run.items_processed is not None
+    assert source2_run.items_processed is not None
+    
+    # This proves the flag resets: both sources got SourceRuns despite source1's failure
 
