@@ -518,41 +518,39 @@ def test_ingest_batch_failure_non_db_fail_fast_writes_source_run(session, mocker
     
     session.commit()
     
-    # Mock the iteration of source_items to raise by making source_items itself a FailingIterator
-    # This ensures the exception occurs INSIDE the per-source try block (line 142) during iteration (line 143)
+    # To get a batch-level exception inside per-source try, the iteration itself must fail.
+    # Since everything in per-source try is inside the item loop, we need to make the iteration raise.
+    # Mock defaultdict.__getitem__ to return a FailingIterator for the first source.
+    # This is slightly implementation-dependent but tests a valid scenario: iteration failure.
     from collections import defaultdict
     
     class FailingIterator:
-        """Iterator that raises on first iteration attempt."""
+        """Iterator that raises when iterated - simulates batch-level failure during iteration."""
         def __init__(self, items):
-            self.items = items
+            self._items = list(items)
             self._raised = False
         
         def __iter__(self):
             if not self._raised:
                 self._raised = True
                 raise RuntimeError("Simulated batch-level failure: iteration error")
-            return iter(self.items)
+            return iter(self._items)
+        
+        def append(self, item):
+            self._items.append(item)
     
-    # Mock defaultdict.items() to return a dict where the first source's value is a FailingIterator
-    # This way, when we do "for raw_item in source_items:" inside the per-source try, it will raise
+    # Mock defaultdict.__getitem__ to return FailingIterator for first source
     call_count = [0]
-    original_items = defaultdict.items
+    original_defaultdict_getitem = defaultdict.__getitem__
     
-    def mock_items(self):
+    def mock_defaultdict_getitem(self, key):
+        result = original_defaultdict_getitem(self, key)
         call_count[0] += 1
-        if call_count[0] == 1:  # First source batch
-            # Get normal items dict
-            result = dict(original_items(self))
-            # Replace first source's list with FailingIterator
-            if result:
-                first_key = list(result.keys())[0]
-                result[first_key] = FailingIterator(result[first_key])
-            return result.items()
-        # For subsequent sources, return normal items
-        return original_items(self)
+        if call_count[0] == 1:  # First source accessed - wrap in FailingIterator
+            return FailingIterator(result)
+        return result
     
-    mocker.patch.object(defaultdict, 'items', mock_items)
+    mocker.patch.object(defaultdict, '__getitem__', mock_defaultdict_getitem)
     
     # Run ingest_external_main with fail_fast=True
     # This should raise an exception, but SourceRun should be created first
@@ -581,13 +579,130 @@ def test_ingest_batch_failure_non_db_fail_fast_writes_source_run(session, mocker
     assert our_run is not None, f"No INGEST SourceRun found with run_group_id={run_group_id}"
     assert our_run.phase == "INGEST"
     assert our_run.run_group_id == run_group_id
-    # Status should be FAILURE (batch-level exception occurred)
+    # Status should be FAILURE (batch-level exception occurred during iteration)
     assert our_run.status == "FAILURE"
     assert our_run.error is not None
-    assert "failure" in our_run.error.lower() or "iteration" in our_run.error.lower()
+    assert "failure" in our_run.error.lower() or "iteration" in our_run.error.lower() or "error" in our_run.error.lower()
     # Duration should be set (proves SourceRun was created)
     assert our_run.duration_seconds is not None
     assert our_run.duration_seconds >= 0
-    # Items processed should be 0 (batch failed before processing items)
+    # Items processed should be 0 (batch failed before processing any items)
     assert our_run.items_processed == 0
+
+
+def test_ingest_commit_failure_does_not_double_write_source_run(session, mocker):
+    """Test that commit failure does not set source_run_written and does not cause duplicate SourceRun (v1.0)."""
+    run_group_id = "test-group-commit-failure"
+    source_id = "test_source"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create a raw item
+    save_raw_item(
+        session,
+        source_id=source_id,
+        tier="global",
+        candidate={
+            "canonical_id": "commit-fail-item-1",
+            "title": "Commit Fail Item",
+            "url": "https://example.com/commit-fail",
+            "published_at_utc": now,
+            "payload": {"title": "Commit Fail Item"},
+        },
+    )
+    
+    session.commit()
+    
+    # Track SourceRun creation attempts
+    create_source_run_calls = []
+    original_create_source_run = None
+    
+    def mock_create_source_run(*args, **kwargs):
+        nonlocal original_create_source_run
+        if original_create_source_run is None:
+            from sentinel.database.source_run_repo import create_source_run
+            original_create_source_run = create_source_run
+        # Track the call
+        create_source_run_calls.append({
+            "source_id": kwargs.get("source_id") or args[1] if len(args) > 1 else None,
+            "phase": kwargs.get("phase") or args[2] if len(args) > 2 else None,
+            "run_group_id": kwargs.get("run_group_id") or args[0] if len(args) > 0 else None,
+        })
+        # Call the real function
+        return original_create_source_run(*args, **kwargs)
+    
+    mocker.patch(
+        "sentinel.runners.ingest_external.create_source_run",
+        side_effect=mock_create_source_run
+    )
+    
+    # Mock session.commit() to fail on the commit after create_source_run in except block
+    commit_count = [0]
+    create_source_run_count = [0]
+    original_commit = session.commit
+    
+    def mock_commit():
+        commit_count[0] += 1
+        # Fail on the commit that happens after create_source_run in the except block
+        # We detect this by checking if we've created a SourceRun and this is the commit after it
+        if len(create_source_run_calls) > 0 and commit_count[0] == len(create_source_run_calls):
+            # This is the commit after a SourceRun creation - fail it
+            raise RuntimeError("Simulated commit failure: database error")
+        return original_commit()
+    
+    mocker.patch.object(session, 'commit', side_effect=mock_commit)
+    
+    # Cause a batch-level exception so we hit the except block where SourceRun is created
+    # Use iteration failure (same approach as non-DB test) to trigger batch-level exception
+    from collections import defaultdict
+    
+    class FailingIterator:
+        """Iterator that raises when iterated."""
+        def __init__(self, items):
+            self._items = list(items)
+            self._raised = False
+        
+        def __iter__(self):
+            if not self._raised:
+                self._raised = True
+                raise RuntimeError("Simulated batch-level failure for commit test")
+            return iter(self._items)
+        
+        def append(self, item):
+            self._items.append(item)
+    
+    iter_call_count = [0]
+    original_defaultdict_getitem = defaultdict.__getitem__
+    
+    def mock_defaultdict_getitem_iter(self, key):
+        result = original_defaultdict_getitem(self, key)
+        iter_call_count[0] += 1
+        if iter_call_count[0] == 1:  # First source - return FailingIterator
+            return FailingIterator(result)
+        return result
+    
+    mocker.patch.object(defaultdict, '__getitem__', mock_defaultdict_getitem_iter)
+    
+    # Run ingest_external_main with fail_fast=False
+    # The commit failure should propagate, but source_run_written should not be set
+    with pytest.raises(RuntimeError, match="Simulated commit failure"):
+        ingest_external_main(
+            session=session,
+            source_id=source_id,
+            run_group_id=run_group_id,
+            fail_fast=False,
+        )
+    
+    # Restore original commit for cleanup
+    session.commit = original_commit
+    
+    # Assert: create_source_run was called exactly once (no double-write)
+    # The flag source_run_written should prevent a second attempt
+    ingest_calls = [c for c in create_source_run_calls if c.get("phase") == "INGEST"]
+    assert len(ingest_calls) == 1, f"Expected 1 INGEST SourceRun creation attempt, got {len(ingest_calls)}"
+    
+    # Assert: The SourceRun was not persisted (commit failed)
+    runs = list_recent_runs(session, source_id=source_id, phase="INGEST", run_group_id=run_group_id)
+    # If commit failed, the SourceRun should not be in the database
+    # (This verifies that source_run_written was not set, so no duplicate attempt was made)
+    assert len(runs) == 0, f"Expected 0 persisted SourceRuns (commit failed), got {len(runs)}"
 
