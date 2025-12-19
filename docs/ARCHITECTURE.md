@@ -15,11 +15,17 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 
 **External Pipeline (v0.6+):**
 - Fetch raw items from configured sources
+  - Create FETCH SourceRun records per source (v0.9)
+  - Track status, status_code, error, duration, items_fetched, items_new
 - Store in `raw_items` table with deduplication
 - Normalize into canonical event format
 - Evaluate suppression rules (v0.8)
 - Link to network entities
 - Generate alerts with trust tier weighting (v0.7)
+  - Create INGEST SourceRun records per source (v0.9)
+  - Track items_processed, items_suppressed, items_events_created, items_alerts_touched
+  - Guarantee SourceRun creation even on failure (v1.0)
+- Evaluate run status and exit with appropriate code (v1.0)
 - Output to brief with tier-aware grouping
 
 ## Core Components
@@ -43,7 +49,71 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 - Time-based filtering (`--since` flag)
 - Status tracking (NEW, NORMALIZED, FAILED, SUPPRESSED)
 
-### 2. Suppression (`sentinel/suppression/`) — v0.8
+### 2. Source Health Tracking (`sentinel/database/source_run_repo.py`) — v0.9
+
+**Purpose:** Monitor the health and reliability of external sources.
+
+- **`SourceRun` Model**: Tracks fetch and ingest operations per source
+  - `run_group_id`: UUID linking related FETCH and INGEST runs
+  - `phase`: FETCH or INGEST
+  - `status`: SUCCESS or FAILURE
+  - `status_code`: HTTP status code (for FETCH phase)
+  - `error`: Error message (truncated to 1000 chars)
+  - `duration_seconds`: Operation duration
+  - Metrics: `items_fetched`, `items_new`, `items_processed`, `items_suppressed`, `items_events_created`, `items_alerts_touched`
+- **Repository Functions**:
+  - `create_source_run()`: Create run records with metrics
+  - `list_recent_runs()`: Query recent runs with filters
+  - `get_source_health()`: Calculate health metrics for a source
+  - `get_all_source_health()`: Calculate health for all sources
+
+**Key Design:**
+- Two-phase tracking: Separate FETCH and INGEST records per source
+- `run_group_id` links related operations from a single `sentinel run` execution
+- Health metrics: success rate, stale detection, last error, last status code
+- Guaranteed records: Every fetch and ingest operation creates a SourceRun (v1.0)
+- Zero items = SUCCESS: Quiet successes (0 items fetched) are still marked SUCCESS
+
+**Health Metrics:**
+- Success rate: Percentage of successful FETCH runs over last N runs
+- Stale detection: Sources that haven't succeeded in X hours
+- Last error: Most recent error message and status code
+- Ingest summary: Items processed, suppressed, events created, alerts touched
+
+### 3. Run Status Evaluation (`sentinel/ops/run_status.py`) — v1.0
+
+**Purpose:** Self-evaluating runs with exit codes for automation and monitoring.
+
+- **`evaluate_run_status()` Function**: Deterministic evaluation of run health
+  - Returns exit code (0=healthy, 1=warning, 2=broken) and status messages
+  - Checks config errors, schema drift, source failures, ingest crashes
+  - Provides actionable status messages (top 1-3 for display)
+
+**Exit Code Rules:**
+- **Broken (2)** if:
+  - Config parse error (sources.yaml or suppression.yaml)
+  - Schema drift detected for required tables/columns
+  - Zero sources enabled (misconfig)
+  - All enabled sources failed fetch (no successes) AND none fetched quietly
+  - Ingest crashed before processing any source
+- **Warning (1)** if:
+  - Some enabled sources failed fetch
+  - Some enabled sources are stale (no success within threshold)
+  - Ingest failure for one or more sources
+  - Suppression config loads but has disabled state or duplicate IDs warning
+- **Healthy (0)** if:
+  - Config valid
+  - Schema ok
+  - At least one enabled source fetched successfully OR had "quiet success"
+  - Ingest ran for at least one source without fatal error
+
+**Key Design:**
+- Deterministic: Same conditions = same exit code
+- Actionable: Status messages explain what's wrong
+- Strict mode: `--strict` flag treats warnings as broken (exit code 2)
+- Integration: Called by `cmd_run()` after fetch and ingest phases
+
+### 4. Suppression (`sentinel/suppression/`) — v0.8
 
 **Purpose:** Filter noisy events using configurable rules.
 
@@ -63,7 +133,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 - Composable (global + per-source rules both apply)
 - Safe (suppression prevents alert creation but creates events for audit)
 
-### 3. Ingestion (`sentinel/ingestion/`)
+### 5. Ingestion (`sentinel/ingestion/`)
 
 **Purpose:** Load structured data into the system.
 
@@ -76,7 +146,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 - Configurable file paths via `sentinel.config.yaml`
 - Logs progress for debugging
 
-### 4. Parsing (`sentinel/parsing/`)
+### 6. Parsing (`sentinel/parsing/`)
 
 **Purpose:** Transform raw events into canonical format and link to network data.
 
@@ -91,7 +161,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 - Fuzzy matching for facility lookup
 - Date-aware shipment filtering (upcoming shipments only)
 
-### 5. Database (`sentinel/database/`)
+### 7. Database (`sentinel/database/`)
 
 **Purpose:** Local SQLite storage for network data and events.
 
@@ -102,10 +172,12 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
   - `RawItem`: Fetched items from external sources (v0.6+)
   - `Event`: Ingested events (with external source metadata, trust tier, suppression metadata)
   - `Alert`: Generated risk alerts (with correlation, brief fields, tier, trust_tier, source_id)
+  - `SourceRun`: Health tracking records for fetch and ingest operations (v0.9)
 - **`sqlite_client.py`**: Session management and engine creation
 - **`alert_repo.py`**: Repository functions for alert persistence and correlation queries
 - **`event_repo.py`**: Repository functions for event persistence (v0.6+)
 - **`raw_item_repo.py`**: Repository functions for raw item storage and retrieval (v0.6+)
+- **`source_run_repo.py`**: Repository functions for source health tracking (v0.9)
 - **`migrate.py`**: Additive migration helper for schema evolution
 
 **Key Design:**
@@ -113,7 +185,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 - Auto-creates tables on first use
 - No external dependencies (no cloud, no network)
 
-### 6. Alerts (`sentinel/alerts/`)
+### 8. Alerts (`sentinel/alerts/`)
 
 **Purpose:** Generate structured risk alerts from events.
 
@@ -143,7 +215,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 - Deterministic classification based on network impact scoring
 - Supports alert correlation for deduplication and tracking evolving risks
 
-### 7. Alert Correlation (`sentinel/alerts/correlation.py`)
+### 9. Alert Correlation (`sentinel/alerts/correlation.py`)
 
 **Purpose:** Deduplicate and update alerts based on correlation keys.
 
@@ -160,7 +232,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 - Updates scope and impact_score when alert is correlated
 - Requires database session (correlation is a persistence feature)
 
-### 8. Daily Brief (`sentinel/output/daily_brief.py`)
+### 10. Daily Brief (`sentinel/output/daily_brief.py`)
 
 **Purpose:** Generate summaries of recent alerts for human consumption.
 
@@ -190,7 +262,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 - Tier-aware grouping and counts (v0.7)
 - Transparent suppression reporting (v0.8)
 
-### 9. Database Migrations (`sentinel/database/migrate.py`)
+### 11. Database Migrations (`sentinel/database/migrate.py`)
 
 **Purpose:** Additive schema changes for SQLite.
 
@@ -204,7 +276,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 - Safe: Idempotent (can run multiple times)
 - Simple: Direct SQLite ALTER TABLE statements
 
-### 10. Runners (`sentinel/runners/`)
+### 12. Runners (`sentinel/runners/`)
 
 **Purpose:** Executable scripts for common workflows.
 
@@ -216,6 +288,8 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
   - Links events to network entities
   - Generates alerts with trust tier weighting (v0.7)
   - Handles correlation and updates
+  - Creates INGEST SourceRun records per source (v0.9)
+  - Guarantees SourceRun creation even on failure (v1.0)
 
 **Key Design:**
 - Each runner is a standalone `main()` function
@@ -230,6 +304,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
    - Rate-limited HTTP requests with retry logic
    - Deduplication based on `canonical_id` and `content_hash`
    - Stores in `raw_items` table with status NEW
+   - Creates FETCH SourceRun record per source with metrics (v0.9)
 2. **Normalization**: `sentinel ingest-external` normalizes raw items
    - Converts to canonical event format
    - Extracts source metadata (source_id, tier, url, published_at)
@@ -259,7 +334,17 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
    - Check for existing alerts within 7-day window
    - Update existing or create new alert
    - Update tier, source_id, trust_tier from latest event (v0.7)
-7. **Output**: Structured alert (JSON) or daily brief (Markdown/JSON)
+7. **SourceRun Creation** (v0.9, v1.0):
+   - Creates INGEST SourceRun record per source after processing
+   - Tracks items_processed, items_suppressed, items_events_created, items_alerts_touched
+   - Guaranteed creation even on catastrophic failure (v1.0)
+   - Error messages truncated to 1000 chars for database safety
+8. **Run Status Evaluation** (v1.0):
+   - Evaluates fetch results, ingest runs, doctor findings, stale sources
+   - Determines exit code (0=healthy, 1=warning, 2=broken)
+   - Provides actionable status messages
+   - Prints status footer with top issues
+9. **Output**: Structured alert (JSON) or daily brief (Markdown/JSON)
    - Brief includes tier counts, badges, grouping (v0.7)
    - Brief includes suppressed counts and breakdowns (v0.8)
 
@@ -323,7 +408,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
 
 Defines external sources with metadata:
 - **id**: Unique source identifier
-- **type**: Source adapter type (rss, nws, fema)
+- **type**: Source adapter type (rss, nws_alerts)
 - **tier**: Global, Regional, or Local
 - **url**: Source endpoint URL
 - **enabled**: Whether source is active
@@ -332,6 +417,10 @@ Defines external sources with metadata:
 - **classification_floor**: Minimum alert classification (0-2, default 0) (v0.7)
 - **weighting_bias**: Impact score adjustment (-2 to +2, default 0) (v0.7)
 - **suppress**: Per-source suppression rules (v0.8)
+
+**Example Files:**
+- `config/sources.example.yaml`: Example configuration with explanatory comments
+- Use `sentinel init` to create `config/sources.yaml` from example (v1.0)
 
 ### Suppression Configuration (`config/suppression.yaml`) (v0.8)
 
@@ -345,6 +434,51 @@ Defines global suppression rules:
   - **case_sensitive**: Whether matching is case-sensitive
   - **note**: Human-readable note
   - **reason_code**: Short code for reporting
+
+**Example Files:**
+- `config/suppression.example.yaml`: Example configuration with conservative defaults
+- Use `sentinel init` to create `config/suppression.yaml` from example (v1.0)
+
+## Operational Features (v1.0)
+
+### Starter Configuration
+
+- **`sentinel init`**: Initialize configuration files from examples
+  - Creates `config/sources.yaml` from `config/sources.example.yaml`
+  - Creates `config/suppression.yaml` from `config/suppression.example.yaml`
+  - Refuses to overwrite existing files unless `--force` flag used
+  - Enables smooth first-time setup for new users
+
+### Run Status Evaluation
+
+- **Self-Evaluating Runs**: `sentinel run` evaluates its own health
+  - Exit code 0 (Healthy): No critical issues
+  - Exit code 1 (Warning): Some sources stale/failing, but pipeline functioning
+  - Exit code 2 (Broken): Schema/config invalid, cannot fetch/ingest at all
+- **Status Footer**: Prints run status and top issues after each run
+- **Strict Mode**: `--stale` and `--strict` flags for fine-grained control
+
+### Guaranteed Failure Reporting
+
+- **No Silent Failures**: All ingest operations create SourceRun records
+  - Success: Creates SourceRun with status=SUCCESS and metrics
+  - Failure: Creates SourceRun with status=FAILURE and error message
+  - Zero items: Creates SourceRun with status=SUCCESS and items_processed=0
+- **Error Tracking**: Error messages truncated to 1000 chars for database safety
+- **Fail-Fast Option**: `--fail-fast` flag stops processing on first source failure
+
+### Doctor Command Enhancements
+
+- **"What would I do next?"**: Priority-based recommendations
+  - Schema drift → "Delete sentinel.db and rerun `sentinel run --since 24h`"
+  - Stale sources → "Run `sentinel sources test <id> --since 72h`"
+  - All fetch failing → "Check network / user agent / endpoint URLs"
+  - Suppression invalid → "Fix suppression.yaml regex: <rule id>"
+- **Last Run Group Summary**: Shows most recent run_group_id statistics
+  - Fetch: X success / Y fail / Z quiet success
+  - Ingest: X success / Y fail
+  - Alerts touched: total
+  - Suppressed: total
 
 ## Future Enhancements
 

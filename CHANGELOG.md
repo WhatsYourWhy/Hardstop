@@ -1,5 +1,85 @@
 # Changelog
 
+## [1.0.0] - 2024-XX-XX
+
+### Added
+- Self-evaluating runs with exit codes
+  - Exit code 0 (Healthy): No critical issues
+  - Exit code 1 (Warning): Some sources stale/failing, but pipeline functioning
+  - Exit code 2 (Broken): Schema/config invalid, cannot fetch/ingest at all
+  - `--strict` flag to treat warnings as broken
+- Run status evaluation module (`sentinel/ops/run_status.py`)
+  - Deterministic evaluation of run health
+  - Checks config errors, schema drift, source failures, ingest crashes
+  - Provides actionable status messages
+- Guaranteed INGEST SourceRun rows on failure
+  - All ingest operations (success or failure) create SourceRun records
+  - Failure rows include error messages (truncated to 1000 chars)
+  - No silent failures - every source batch gets a record
+- `--fail-fast` flag for ingest operations
+  - Stop processing on first source failure
+  - Available in `sentinel ingest-external` and `sentinel run`
+- Doctor command enhancements
+  - "What would I do next?" section with priority-based recommendations
+  - Last run group summary showing fetch/ingest statistics
+  - Clear distinction between "quiet feeds, healthy" vs "quiet because broken"
+- Starter configuration files
+  - `config/sources.example.yaml` with explanatory comments
+  - `config/suppression.example.yaml` with conservative defaults
+  - `sentinel init` command to create config files from examples
+  - `--force` flag to overwrite existing configs
+
+### Changed
+- `sentinel run` now evaluates status and exits with appropriate code
+- `sentinel run` prints status footer with top issues
+- Ingest pipeline guarantees SourceRun creation even on catastrophic failures
+- Doctor command provides actionable next steps instead of just diagnostics
+
+### Technical
+- New module: `sentinel/ops/run_status.py` for status evaluation
+- Enhanced `ingest_external.main()` with guaranteed SourceRun creation
+- Improved error handling and reporting throughout pipeline
+- All failure paths are now auditable via SourceRun records
+
+## [0.9.0] - 2024-XX-XX
+
+### Added
+- Source health tracking system
+  - `source_runs` table to track fetch and ingest operations
+  - Two-phase monitoring (FETCH and INGEST phases)
+  - `run_group_id` UUID linking related fetch and ingest runs
+  - Health metrics: success rate, stale detection, last error, last status code
+- Source health commands
+  - `sentinel sources test <id>`: Test a single source with summary output
+  - `sentinel sources health`: Display health table for all sources
+  - `--stale` and `--lookback` flags for health queries
+- SourceRun repository functions
+  - `create_source_run()`: Create run records with metrics
+  - `list_recent_runs()`: Query recent runs with filters
+  - `get_source_health()`: Calculate health metrics for a source
+  - `get_all_source_health()`: Calculate health for all sources
+- Enhanced fetcher with structured results
+  - `FetchResult` Pydantic model with status, status_code, error, duration
+  - `SourceFetcher.fetch_all()` returns `List[FetchResult]`
+  - `SourceFetcher.fetch_one()` for single-source fetching
+  - Zero items fetched is treated as SUCCESS (quiet success)
+- Doctor command enhancements
+  - Source health table check
+  - Stale source count and recommendations
+  - Source runs table validation
+
+### Changed
+- `cmd_fetch()` now creates FETCH phase SourceRun records
+- `ingest_external.main()` now creates INGEST phase SourceRun records per source
+- `cmd_run()` generates and passes `run_group_id` to link related operations
+- Health metrics computed from SourceRun records instead of ad-hoc queries
+
+### Technical
+- Database schema: Added `SourceRun` model with comprehensive metrics
+- Migration: `ensure_source_runs_table()` function
+- Repository: `source_run_repo.py` with health calculation logic
+- Fetcher: Enhanced error capture and duration tracking
+
 ## [0.8.0] - 2024-XX-XX
 
 ### Added
