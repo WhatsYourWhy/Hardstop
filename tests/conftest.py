@@ -8,6 +8,7 @@ from sentinel.database.migrate import (
     ensure_alert_correlation_columns,
     ensure_event_external_fields,
     ensure_raw_items_table,
+    ensure_source_runs_table,
     ensure_suppression_columns,
     ensure_trust_tier_columns,
 )

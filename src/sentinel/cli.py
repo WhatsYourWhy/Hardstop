@@ -1,7 +1,10 @@
 """CLI entrypoint for Sentinel agent."""
 
 import argparse
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 import requests
 
@@ -17,12 +20,15 @@ from sentinel.database.migrate import (
     ensure_alert_correlation_columns,
     ensure_event_external_fields,
     ensure_raw_items_table,
+    ensure_source_runs_table,
     ensure_suppression_columns,
     ensure_trust_tier_columns,
 )
 from sentinel.database.raw_item_repo import save_raw_item
 from sentinel.database.schema import Alert, Event, RawItem
+from sentinel.database.source_run_repo import create_source_run
 from sentinel.database.sqlite_client import session_context
+from sentinel.retrieval.fetcher import FetchResult
 from sentinel.output.daily_brief import (
     _parse_since,
     generate_brief,
@@ -78,10 +84,202 @@ def cmd_sources_list(args: argparse.Namespace) -> None:
         raise
 
 
-def cmd_fetch(args: argparse.Namespace) -> None:
-    """Fetch items from external sources."""
+def cmd_sources_test(args: argparse.Namespace) -> None:
+    """Test a single source by fetching (and optionally ingesting)."""
     config = load_config()
     sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    
+    # Generate run_group_id
+    run_group_id = str(uuid.uuid4())
+    
+    # Ensure migrations
+    from sentinel.database.sqlite_client import get_engine
+    get_engine(sqlite_path)
+    ensure_raw_items_table(sqlite_path)
+    ensure_event_external_fields(sqlite_path)
+    ensure_alert_correlation_columns(sqlite_path)
+    ensure_trust_tier_columns(sqlite_path)
+    ensure_source_runs_table(sqlite_path)
+    
+    # Create fetcher
+    fetcher = SourceFetcher()
+    
+    # Fetch single source
+    try:
+        result = fetcher.fetch_one(
+            source_id=args.source_id,
+            since=args.since,
+            max_items=args.max_items,
+        )
+        
+        # Print fetch summary
+        print(f"\nFetch Results for {args.source_id}:")
+        print(f"  Status: {result.status}")
+        if result.status_code:
+            print(f"  HTTP Status: {result.status_code}")
+        if result.duration_seconds:
+            print(f"  Duration: {result.duration_seconds:.2f}s")
+        print(f"  Items Fetched: {len(result.items)}")
+        
+        if result.status == "FAILURE":
+            print(f"  Error: {result.error}")
+            return
+        
+        # Save items to database
+        sources_config = load_sources_config()
+        all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
+        source_config_raw = all_sources.get(args.source_id, {})
+        source_config = get_source_with_defaults(source_config_raw) if source_config_raw else {}
+        tier = source_config.get("tier", "unknown")
+        trust_tier = source_config.get("trust_tier", 2)
+        
+        items_new = 0
+        with session_context(sqlite_path) as session:
+            for candidate in result.items:
+                try:
+                    candidate_dict = candidate.model_dump() if hasattr(candidate, "model_dump") else candidate
+                    raw_item = save_raw_item(
+                        session,
+                        source_id=args.source_id,
+                        tier=tier,
+                        candidate=candidate_dict,
+                        trust_tier=trust_tier,
+                    )
+                    if raw_item in session.new or raw_item.status == "NEW":
+                        items_new += 1
+                except Exception as e:
+                    logger.error(f"Failed to save raw item: {e}")
+            
+            # Create FETCH SourceRun record
+            create_source_run(
+                session,
+                run_group_id=run_group_id,
+                source_id=args.source_id,
+                phase="FETCH",
+                run_at_utc=result.fetched_at_utc,
+                status=result.status,
+                status_code=result.status_code,
+                error=result.error,
+                duration_seconds=result.duration_seconds,
+                items_fetched=len(result.items),
+                items_new=items_new,
+            )
+            session.commit()
+        
+        print(f"  Items New (stored): {items_new}")
+        
+        # Show sample titles
+        if result.items:
+            print(f"\n  Sample Titles (top 3):")
+            for i, item in enumerate(result.items[:3], 1):
+                title = item.title or "(no title)"
+                print(f"    {i}. {title[:80]}")
+        
+        # If --ingest flag, run ingest for this source
+        if args.ingest:
+            print(f"\nIngesting items from {args.source_id}...")
+            ingest_args = argparse.Namespace(
+                limit=200,
+                min_tier=None,
+                source_id=args.source_id,
+                since=args.since,
+                no_suppress=False,
+                explain_suppress=False,
+            )
+            cmd_ingest_external(ingest_args, run_group_id=run_group_id)
+    
+    except ValueError as e:
+        print(f"Error: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error testing source: {e}", exc_info=True)
+        raise
+
+
+def cmd_sources_health(args: argparse.Namespace) -> None:
+    """Display source health table."""
+    config = load_config()
+    sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    
+    # Parse stale threshold
+    stale_hours = 48  # default
+    if args.stale:
+        stale_str = args.stale.lower().strip()
+        if stale_str.endswith("h"):
+            stale_hours = int(stale_str[:-1])
+        elif stale_str.endswith("d"):
+            stale_hours = int(stale_str[:-1]) * 24
+    
+    lookback_n = args.lookback or 10
+    
+    # Get source configs for tier info
+    sources_config = load_sources_config()
+    all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
+    
+    with session_context(sqlite_path) as session:
+        from sentinel.database.source_run_repo import get_all_source_health
+        
+        health_list = get_all_source_health(session, lookback_n=lookback_n)
+        
+        if not health_list:
+            print("No source health data available. Run 'sentinel fetch' first.")
+            return
+        
+        # Calculate stale threshold
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=stale_hours)
+        stale_cutoff_iso = stale_cutoff.isoformat()
+        
+        # Format table
+        print(f"\nSource Health (last {lookback_n} runs, stale threshold: {stale_hours}h)")
+        print("=" * 120)
+        print(f"{'ID':<25} {'Tier':<8} {'Last Success':<20} {'SR':<6} {'Code':<6} {'New':<6} {'Stale':<8} {'Last Ingest (sup/proc)':<25}")
+        print("-" * 120)
+        
+        # Sort by tier, then by last_success_utc (stale first)
+        def sort_key(h):
+            tier_order = {"global": 0, "regional": 1, "local": 2}
+            tier = all_sources.get(h["source_id"], {}).get("tier", "unknown")
+            tier_val = tier_order.get(tier, 99)
+            last_success = h.get("last_success_utc") or "0000-00-00T00:00:00"
+            is_stale = last_success < stale_cutoff_iso if last_success else True
+            return (not is_stale, tier_val, last_success)
+        
+        health_list.sort(key=sort_key)
+        
+        for health in health_list:
+            source_id = health["source_id"]
+            tier = all_sources.get(source_id, {}).get("tier", "unknown")[:1].upper()  # G/R/L
+            last_success = health.get("last_success_utc") or "Never"
+            if last_success != "Never":
+                # Format timestamp for display
+                try:
+                    dt = datetime.fromisoformat(last_success.replace("Z", "+00:00"))
+                    last_success = dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    pass
+            success_rate = health.get("success_rate", 0.0)
+            status_code = health.get("last_status_code") or "-"
+            last_new = health.get("last_items_new", 0)
+            is_stale = last_success != "Never" and health.get("last_success_utc", "") < stale_cutoff_iso if health.get("last_success_utc") else True
+            stale = "YES" if is_stale else "NO"
+            
+            last_ingest = health.get("last_ingest", {})
+            ingest_str = f"{last_ingest.get('suppressed', 0)}/{last_ingest.get('processed', 0)}"
+            
+            print(f"{source_id:<25} {tier:<8} {last_success:<20} {success_rate:.2f}  {status_code:<6} {last_new:<6} {stale:<8} {ingest_str:<25}")
+        
+        print()
+
+
+def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> None:
+    """Fetch items from external sources."""
+    
+    config = load_config()
+    sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    
+    # Generate run_group_id if not provided
+    if run_group_id is None:
+        run_group_id = str(uuid.uuid4())
     
     # Ensure base tables exist first (creates all tables from schema)
     from sentinel.database.sqlite_client import get_engine
@@ -92,6 +290,7 @@ def cmd_fetch(args: argparse.Namespace) -> None:
     ensure_event_external_fields(sqlite_path)
     ensure_alert_correlation_columns(sqlite_path)
     ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
+    ensure_source_runs_table(sqlite_path)  # v0.9: source runs table
     
     # Create fetcher
     fetcher = SourceFetcher()
@@ -141,31 +340,62 @@ def cmd_fetch(args: argparse.Namespace) -> None:
         total_stored = 0
         
         with session_context(sqlite_path) as session:
-            for source_id, candidates in results.items():
+            # Get source configs once
+            sources_config = load_sources_config()
+            all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
+            
+            for result in results:  # results is now List[FetchResult]
+                source_id = result.source_id
+                candidates = result.items
+                
                 # Get source config for tier and trust_tier
-                sources_config = load_sources_config()
-                all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
                 source_config_raw = all_sources.get(source_id, {})
                 source_config = get_source_with_defaults(source_config_raw) if source_config_raw else {}
                 tier = source_config.get("tier", "unknown")
                 trust_tier = source_config.get("trust_tier", 2)
                 
+                # Track items actually inserted (new, not duplicates)
+                items_new = 0
+                
                 for candidate in candidates:
                     try:
                         candidate_dict = candidate.model_dump() if hasattr(candidate, "model_dump") else candidate
-                        save_raw_item(
+                        
+                        # Check if item is new by checking if it's in session.new after save
+                        # We'll check the raw_id pattern or use a simpler approach: track count before/after
+                        raw_item = save_raw_item(
                             session,
                             source_id=source_id,
                             tier=tier,
                             candidate=candidate_dict,
                             trust_tier=trust_tier,
                         )
-                        total_stored += 1
+                        
+                        # Check if this is a new item (was just added to session)
+                        # New items have status="NEW" and are in session.new
+                        if raw_item in session.new or raw_item.status == "NEW":
+                            items_new += 1
+                            total_stored += 1
                     except Exception as e:
                         logger.error(f"Failed to save raw item from {source_id}: {e}")
                 
                 total_fetched += len(candidates)
-                logger.info(f"Fetched {len(candidates)} items from {source_id}")
+                logger.info(f"Fetched {len(candidates)} items from {source_id}, {items_new} new")
+                
+                # Create FETCH phase SourceRun record
+                create_source_run(
+                    session,
+                    run_group_id=run_group_id,
+                    source_id=source_id,
+                    phase="FETCH",
+                    run_at_utc=result.fetched_at_utc,
+                    status=result.status,
+                    status_code=result.status_code,
+                    error=result.error,
+                    duration_seconds=result.duration_seconds,
+                    items_fetched=len(candidates),
+                    items_new=items_new,
+                )
             
             session.commit()
         
@@ -176,10 +406,14 @@ def cmd_fetch(args: argparse.Namespace) -> None:
         raise
 
 
-def cmd_ingest_external(args: argparse.Namespace) -> None:
+def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = None) -> None:
     """Ingest external raw items into events and alerts."""
     config = load_config()
     sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    
+    # Generate run_group_id if not provided
+    if run_group_id is None:
+        run_group_id = str(uuid.uuid4())
     
     # Ensure migrations
     ensure_raw_items_table(sqlite_path)
@@ -187,6 +421,7 @@ def cmd_ingest_external(args: argparse.Namespace) -> None:
     ensure_alert_correlation_columns(sqlite_path)
     ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
     ensure_suppression_columns(sqlite_path)  # v0.8: suppression columns
+    ensure_source_runs_table(sqlite_path)  # v0.9: source runs table
     
     # Parse min_tier
     min_tier = args.min_tier
@@ -209,6 +444,7 @@ def cmd_ingest_external(args: argparse.Namespace) -> None:
                 since_hours=since_hours,
                 no_suppress=getattr(args, 'no_suppress', False),
                 explain_suppress=getattr(args, 'explain_suppress', False),
+                run_group_id=run_group_id,
             )
             
             print(f"Ingestion complete:")
@@ -228,6 +464,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     """Convenience command: fetch → ingest external → brief."""
     since_str = args.since or "24h"
     
+    # Generate single run_group_id for entire execution (v0.9)
+    run_group_id = str(uuid.uuid4())
+    
     # Step 1: Fetch
     print("Step 1: Fetching from sources...")
     fetch_args = argparse.Namespace(
@@ -238,7 +477,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         dry_run=False,
         fail_fast=False,
     )
-    cmd_fetch(fetch_args)
+    cmd_fetch(fetch_args, run_group_id=run_group_id)
     
     # Step 2: Ingest external
     print("\nStep 2: Ingesting external items...")
@@ -250,7 +489,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         no_suppress=getattr(args, 'no_suppress', False),
         explain_suppress=False,
     )
-    cmd_ingest_external(ingest_args)
+    cmd_ingest_external(ingest_args, run_group_id=run_group_id)
     
     # Step 3: Brief
     print("\nStep 3: Generating brief...")
@@ -335,6 +574,13 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                         if col not in cols:
                             missing_columns.append(f"raw_items.{col}")
                 
+                # Check source_runs table exists (v0.9)
+                cur = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='source_runs';"
+                )
+                if not cur.fetchone():
+                    missing_columns.append("table: source_runs")
+                
                 if missing_columns:
                     issues.append(f"Schema drift detected: {len(missing_columns)} missing columns/tables")
                     print(f"  [X] Schema drift detected:")
@@ -354,6 +600,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                 ensure_alert_correlation_columns(sqlite_path)
                 ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
                 ensure_suppression_columns(sqlite_path)  # v0.8: suppression columns
+                ensure_source_runs_table(sqlite_path)  # v0.9: source runs table
                 print("  [OK] Migrations applied")
             except Exception as e:
                 issues.append(f"Migration error: {e}")
@@ -509,6 +756,61 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         warnings.append(f"Suppression config error: {e}")
         print(f"  [WARN] Suppression config error: {e}")
     
+    # Check 5: Source health tracking (v0.9)
+    print("\n[5] Source Health Tracking...")
+    try:
+        config = load_config()
+        sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+        db_path = Path(sqlite_path)
+        
+        if not db_path.exists():
+            print("  [INFO] Database not found - source health tracking unavailable")
+        else:
+            import sqlite3
+            conn = sqlite3.connect(sqlite_path)
+            try:
+                # Check if source_runs table exists
+                cur = conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='source_runs';"
+                )
+                if not cur.fetchone():
+                    print("  [INFO] source_runs table not found")
+                    print("  [INFO] Recommended: Run 'sentinel fetch' once to initialize source health tracking")
+                else:
+                    print("  [OK] source_runs table exists")
+                    
+                    # Count stale sources (no successful fetch in last 48h)
+                    try:
+                        with session_context(sqlite_path) as session:
+                            from sentinel.database.source_run_repo import get_all_source_health
+                            
+                            health_list = get_all_source_health(session, lookback_n=10)
+                            stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+                            stale_cutoff_iso = stale_cutoff.isoformat()
+                            
+                            stale_count = 0
+                            for health in health_list:
+                                last_success = health.get("last_success_utc")
+                                if not last_success or last_success < stale_cutoff_iso:
+                                    stale_count += 1
+                            
+                            if stale_count > 0:
+                                warnings.append(f"{stale_count} sources have not succeeded in last 48h")
+                                print(f"  [WARN] Stale sources (no success in 48h): {stale_count}")
+                            else:
+                                print(f"  [OK] All sources healthy (last 48h)")
+                            
+                            if health_list:
+                                print(f"  [OK] Tracking health for {len(health_list)} sources")
+                    except Exception as e:
+                        warnings.append(f"Error checking source health: {e}")
+                        print(f"  [WARN] Error checking source health: {e}")
+            finally:
+                conn.close()
+    except Exception as e:
+        warnings.append(f"Source health check error: {e}")
+        print(f"  [WARN] Source health check error: {e}")
+    
     # Summary
     print("\n" + "=" * 50)
     if issues:
@@ -600,6 +902,44 @@ def main() -> None:
     sources_subparsers = sources_parser.add_subparsers(dest="sources_subcommand", help="Sources subcommands", required=True)
     sources_list_parser = sources_subparsers.add_parser("list", help="List configured sources")
     sources_list_parser.set_defaults(func=cmd_sources_list)
+    
+    # sources test command
+    sources_test_parser = sources_subparsers.add_parser("test", help="Test a single source by fetching")
+    sources_test_parser.add_argument("source_id", help="Source ID to test")
+    sources_test_parser.add_argument(
+        "--since",
+        type=str,
+        default="24h",
+        help="Time window: 24h, 72h, or 7d (default: 24h)",
+    )
+    sources_test_parser.add_argument(
+        "--max-items",
+        type=int,
+        default=20,
+        help="Maximum items to fetch (default: 20)",
+    )
+    sources_test_parser.add_argument(
+        "--ingest",
+        action="store_true",
+        help="Also ingest the fetched items",
+    )
+    sources_test_parser.set_defaults(func=cmd_sources_test)
+    
+    # sources health command
+    sources_health_parser = sources_subparsers.add_parser("health", help="Display source health table")
+    sources_health_parser.add_argument(
+        "--stale",
+        type=str,
+        default="48h",
+        help="Stale threshold: 24h, 48h, 72h, etc. (default: 48h)",
+    )
+    sources_health_parser.add_argument(
+        "--lookback",
+        type=int,
+        default=10,
+        help="Number of recent runs to consider for success rate (default: 10)",
+    )
+    sources_health_parser.set_defaults(func=cmd_sources_health)
     
     # fetch command
     fetch_parser = subparsers.add_parser("fetch", help="Fetch items from external sources")

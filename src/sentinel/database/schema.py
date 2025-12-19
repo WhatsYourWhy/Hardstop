@@ -137,6 +137,35 @@ class Alert(Base):
     trust_tier = Column(Integer, nullable=True)  # 1|2|3 (default 2) - source trust tier
 
 
+class SourceRun(Base):
+    """Source health tracking (v0.9)."""
+    __tablename__ = "source_runs"
+    
+    run_id = Column(String, primary_key=True)  # UUID
+    run_group_id = Column(String, nullable=False, index=True)  # UUID linking related runs
+    source_id = Column(String, nullable=False, index=True)
+    phase = Column(String, nullable=False, index=True)  # FETCH | INGEST
+    run_at_utc = Column(String, nullable=False, index=True)  # ISO 8601
+    status = Column(String, nullable=False)  # SUCCESS | FAILURE
+    status_code = Column(Integer, nullable=True)  # HTTP status code
+    error = Column(Text, nullable=True)  # Error message if failed
+    duration_seconds = Column(Float, nullable=True)
+    
+    # FETCH phase metrics
+    items_fetched = Column(Integer, nullable=False, default=0)
+    items_new = Column(Integer, nullable=False, default=0)  # Actually stored (post-dedup)
+    
+    # INGEST phase metrics
+    items_processed = Column(Integer, nullable=False, default=0)
+    items_suppressed = Column(Integer, nullable=False, default=0)
+    items_events_created = Column(Integer, nullable=False, default=0)
+    items_alerts_touched = Column(Integer, nullable=False, default=0)  # created + updated
+    
+    __table_args__ = (
+        Index('idx_source_runs_source_run_at', 'source_id', 'run_at_utc'),
+    )
+
+
 def create_all(engine_url: str) -> None:
     engine = create_engine(engine_url)
     Base.metadata.create_all(engine)

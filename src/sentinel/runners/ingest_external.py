@@ -1,6 +1,8 @@
 """Runner for ingesting external raw items into events and alerts."""
 
 import json
+import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -20,6 +22,7 @@ from sentinel.database.raw_item_repo import (
     mark_raw_item_status,
     mark_raw_item_suppressed,
 )
+from sentinel.database.source_run_repo import create_source_run
 from sentinel.parsing.network_linker import link_event_to_network
 from sentinel.parsing.normalizer import normalize_external_event
 from sentinel.suppression.engine import evaluate_suppression
@@ -37,6 +40,7 @@ def main(
     since_hours: Optional[int] = None,
     no_suppress: bool = False,
     explain_suppress: bool = False,
+    run_group_id: Optional[str] = None,
 ) -> Dict[str, int]:
     """
     Main ingestion runner for external raw items.
@@ -56,10 +60,15 @@ def main(
         since_hours: Only process items fetched within this many hours
         no_suppress: If True, bypass suppression entirely (v0.8)
         explain_suppress: If True, log suppression decisions (v0.8)
+        run_group_id: Optional UUID linking related runs (v0.9). If None, generates one.
         
     Returns:
         Dict with counts: {"processed": N, "events": M, "alerts": K, "errors": E, "suppressed": S}
     """
+    # Generate run_group_id if not provided
+    if run_group_id is None:
+        run_group_id = str(uuid.uuid4())
+    
     # Load sources config for metadata
     sources_config = load_sources_config()
     all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
@@ -92,6 +101,11 @@ def main(
     
     logger.info(f"Processing {len(raw_items)} raw items for ingestion")
     
+    # Group raw items by source_id (v0.9)
+    items_by_source: Dict[str, List] = defaultdict(list)
+    for raw_item in raw_items:
+        items_by_source[raw_item.source_id].append(raw_item)
+    
     stats = {
         "processed": 0,
         "events": 0,
@@ -100,7 +114,16 @@ def main(
         "suppressed": 0,  # v0.8: suppressed count
     }
     
-    for raw_item in raw_items:
+    # Process each source group
+    for source_id, source_items in items_by_source.items():
+        # Per-source counters (v0.9)
+        source_processed = 0
+        source_suppressed = 0
+        source_events = 0
+        source_alerts = 0
+        source_errors = 0
+        
+        for raw_item in source_items:
         try:
             # Parse raw payload
             payload = json.loads(raw_item.raw_payload_json)
@@ -172,8 +195,10 @@ def main(
                     )
                     session.commit()
                     
+                    source_suppressed += 1
+                    source_events += 1  # Event is still created for audit
                     stats["suppressed"] += 1
-                    stats["events"] += 1  # Event is still created for audit
+                    stats["events"] += 1
                     
                     if explain_suppress:
                         logger.info(
@@ -181,6 +206,7 @@ def main(
                             f"matched: {suppression_result.matched_rule_ids})"
                         )
                     
+                    source_processed += 1
                     stats["processed"] += 1
                     continue  # Skip alert creation
             
@@ -188,6 +214,7 @@ def main(
             # Persist event
             save_event(session, event)
             session.commit()
+            source_events += 1
             stats["events"] += 1
             logger.debug(f"Created event {event['event_id']} from raw_item {raw_item.raw_id}")
             
@@ -196,6 +223,7 @@ def main(
             
             # Build alert (handles correlation internally)
             alert = build_basic_alert(event, session=session)
+            source_alerts += 1
             stats["alerts"] += 1
             logger.debug(f"Created/updated alert {alert.alert_id} for event {event['event_id']}")
             
@@ -203,6 +231,7 @@ def main(
             mark_raw_item_status(session, raw_item.raw_id, "NORMALIZED")
             session.commit()
             
+            source_processed += 1
             stats["processed"] += 1
             
         except Exception as e:
@@ -215,7 +244,34 @@ def main(
             except Exception as rollback_error:
                 logger.error(f"Failed to rollback and mark status: {rollback_error}")
                 session.rollback()
+            source_errors += 1
             stats["errors"] += 1
+        
+        # Create INGEST phase SourceRun record for this source (v0.9)
+        run_at_utc = datetime.now(timezone.utc).isoformat()
+        ingest_status = "SUCCESS" if source_errors == 0 else "FAILURE"
+        
+        create_source_run(
+            session,
+            run_group_id=run_group_id,
+            source_id=source_id,
+            phase="INGEST",
+            run_at_utc=run_at_utc,
+            status=ingest_status,
+            status_code=None,  # INGEST phase doesn't have HTTP status codes
+            error=None if source_errors == 0 else f"{source_errors} errors during processing",
+            duration_seconds=None,  # Could track per-source duration if needed
+            items_processed=source_processed,
+            items_suppressed=source_suppressed,
+            items_events_created=source_events,
+            items_alerts_touched=source_alerts,
+        )
+        session.commit()
+        
+        logger.info(
+            f"Source {source_id}: {source_processed} processed, {source_events} events, "
+            f"{source_alerts} alerts, {source_suppressed} suppressed, {source_errors} errors"
+        )
     
     logger.info(
         f"Ingestion complete: {stats['processed']} processed, "

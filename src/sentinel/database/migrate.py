@@ -221,3 +221,45 @@ def ensure_suppression_columns(sqlite_path: str) -> None:
     finally:
         conn.close()
 
+
+def ensure_source_runs_table(sqlite_path: str) -> None:
+    """
+    Create source_runs table if missing (v0.9).
+    
+    Tracks source health with two-phase monitoring (FETCH and INGEST).
+    
+    Args:
+        sqlite_path: Path to SQLite database file
+    """
+    conn = sqlite3.connect(sqlite_path)
+    try:
+        if not _table_exists(conn, "source_runs"):
+            conn.execute("""
+                CREATE TABLE source_runs (
+                    run_id TEXT PRIMARY KEY,
+                    run_group_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    run_at_utc TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    status_code INTEGER,
+                    error TEXT,
+                    duration_seconds REAL,
+                    items_fetched INTEGER NOT NULL DEFAULT 0,
+                    items_new INTEGER NOT NULL DEFAULT 0,
+                    items_processed INTEGER NOT NULL DEFAULT 0,
+                    items_suppressed INTEGER NOT NULL DEFAULT 0,
+                    items_events_created INTEGER NOT NULL DEFAULT 0,
+                    items_alerts_touched INTEGER NOT NULL DEFAULT 0
+                );
+            """)
+            # Create indexes
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_source_runs_run_group_id ON source_runs(run_group_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_source_runs_source_id ON source_runs(source_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_source_runs_phase ON source_runs(phase);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_source_runs_run_at_utc ON source_runs(run_at_utc);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_source_runs_source_run_at ON source_runs(source_id, run_at_utc);")
+            conn.commit()
+    finally:
+        conn.close()
+
