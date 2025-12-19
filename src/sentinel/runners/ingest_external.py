@@ -271,22 +271,44 @@ def main(
             source_error_msg = error_msg[:1000] if len(error_msg) > 1000 else error_msg
             logger.error(f"Source batch {source_id} failed: {error_msg}", exc_info=True)
             
-            # If fail_fast, re-raise to stop processing
+            # Calculate duration immediately (before potentially re-raising)
+            source_duration = time.monotonic() - source_start_time
+            
+            # Create SourceRun BEFORE potentially re-raising (guaranteed creation, v1.0)
+            run_at_utc = datetime.now(timezone.utc).isoformat()
+            create_source_run(
+                session,
+                run_group_id=run_group_id,
+                source_id=source_id,
+                phase="INGEST",
+                run_at_utc=run_at_utc,
+                status="FAILURE",
+                status_code=None,  # INGEST phase doesn't have HTTP status codes
+                error=source_error_msg,
+                duration_seconds=source_duration,
+                items_processed=source_processed,
+                items_suppressed=source_suppressed,
+                items_events_created=source_events,
+                items_alerts_touched=source_alerts,
+            )
+            session.commit()
+            
+            # NOW re-raise if fail_fast (after SourceRun is safely created)
             if fail_fast:
                 raise
+            # If not fail_fast, continue to next source (SourceRun already created in except block)
+            continue
         
-        # Calculate duration (always runs, regardless of try/except outcome)
+        # Calculate duration (only reached if no batch-level exception occurred)
         source_duration = time.monotonic() - source_start_time
         
         # Create INGEST phase SourceRun record for this source (v0.9, v1.0: guaranteed)
-        # Always write INGEST run, even if source had 0 items or failed (v1.0)
+        # Always write INGEST run, even if source had 0 items (v1.0)
+        # Note: Batch-level failures are handled in except block above
         run_at_utc = datetime.now(timezone.utc).isoformat()
         
         # Determine error message
-        if ingest_status == "FAILURE":
-            # Error already set in except block
-            pass
-        elif source_errors > 0:
+        if source_errors > 0:
             source_error_msg = f"{source_errors} error(s) during processing"
         else:
             source_error_msg = None

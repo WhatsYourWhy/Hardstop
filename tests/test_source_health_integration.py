@@ -372,3 +372,126 @@ def test_ingest_fail_fast_still_writes_source_run(session, mocker):
     assert our_run.duration_seconds is not None
     assert our_run.duration_seconds >= 0
 
+
+def test_ingest_batch_failure_fail_fast_writes_source_run(session, mocker):
+    """Test that batch-level exception with fail-fast writes SourceRun before re-raising (v1.0)."""
+    run_group_id = "test-group-batch-fail-fast"
+    source_id = "test_source"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create a raw item
+    save_raw_item(
+        session,
+        source_id=source_id,
+        tier="global",
+        candidate={
+            "canonical_id": "batch-fail-item-1",
+            "title": "Batch Fail Item",
+            "url": "https://example.com/batch-fail",
+            "published_at_utc": now,
+            "payload": {"title": "Batch Fail Item"},
+        },
+    )
+    
+    session.commit()
+    
+    # Create a custom list-like object that raises when iterated
+    # This simulates a batch-level failure that occurs when trying to iterate over source_items
+    class FailingList:
+        def __init__(self, items):
+            self.items = items
+            self._iterated = False
+        
+        def __iter__(self):
+            if not self._iterated:
+                self._iterated = True
+                raise RuntimeError("Simulated batch-level failure during iteration")
+            return iter(self.items)
+    
+    # Mock defaultdict.items() to return our failing list for the first source
+    call_count = [0]
+    original_defaultdict_items = None
+    
+    def mock_defaultdict_items(self):
+        call_count[0] += 1
+        if call_count[0] == 1:  # First source batch
+            # Get the actual items for this source
+            from collections import defaultdict
+            actual_items = defaultdict.items(self)
+            # Return a dict with a failing list for the first source
+            result = dict(actual_items)
+            if result:
+                first_key = list(result.keys())[0]
+                result[first_key] = FailingList(result[first_key])
+            return result.items()
+        # For subsequent sources, return normal items
+        from collections import defaultdict
+        return defaultdict.items(self)
+    
+    # Actually, simpler: mock the items_by_source dict itself to have a failing iterator
+    # We'll patch get_raw_items_for_ingest to return items, then mock the grouping
+    # Or even simpler: mock time.monotonic to raise on the second call (duration calculation in except)
+    # But that's not really a batch-level exception.
+    
+    # Best approach: Mock the iteration of source_items to raise
+    # We can do this by patching the defaultdict.items() method
+    from collections import defaultdict
+    
+    original_items = defaultdict.items
+    
+    def mock_items(self):
+        if hasattr(self, '_mock_raise'):
+            raise RuntimeError("Simulated batch-level failure during batch iteration")
+        return original_items(self)
+    
+    # Actually, let's use a simpler approach: mock session.commit() to raise on first call in the batch
+    # This simulates a database error during batch processing
+    commit_count = [0]
+    original_commit = session.commit
+    
+    def mock_commit():
+        commit_count[0] += 1
+        # Raise on the commit that would happen during item processing (batch-level)
+        # We want it to raise inside the try block but outside item-level try
+        if commit_count[0] == 1:  # First commit attempt
+            raise RuntimeError("Simulated batch-level failure: database error")
+        return original_commit()
+    
+    mocker.patch.object(session, 'commit', side_effect=mock_commit)
+    
+    # Run ingest_external_main with fail_fast=True
+    # This should raise an exception, but SourceRun should be created first
+    with pytest.raises(RuntimeError, match="Simulated batch-level failure"):
+        ingest_external_main(
+            session=session,
+            source_id=source_id,
+            run_group_id=run_group_id,
+            fail_fast=True,
+        )
+    
+    # Commit to ensure SourceRun is persisted (restore original commit)
+    session.commit = original_commit
+    session.commit()
+    
+    # Assert: INGEST SourceRun was created before exception was re-raised
+    runs = list_recent_runs(session, source_id=source_id, phase="INGEST")
+    assert len(runs) >= 1, f"Expected at least 1 INGEST SourceRun, got {len(runs)}"
+    
+    # Find the run with our run_group_id
+    our_run = None
+    for run in runs:
+        if run.run_group_id == run_group_id:
+            our_run = run
+            break
+    
+    assert our_run is not None, f"No INGEST SourceRun found with run_group_id={run_group_id}"
+    assert our_run.phase == "INGEST"
+    assert our_run.run_group_id == run_group_id
+    # Status should be FAILURE (batch-level exception occurred)
+    assert our_run.status == "FAILURE"
+    assert our_run.error is not None
+    assert "failure" in our_run.error.lower() or "error" in our_run.error.lower() or "database" in our_run.error.lower()
+    # Duration should be set (proves SourceRun was created)
+    assert our_run.duration_seconds is not None
+    assert our_run.duration_seconds >= 0
+

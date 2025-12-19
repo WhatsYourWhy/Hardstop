@@ -193,9 +193,9 @@
 - Alert evidence includes source metadata
   - `evidence.source` field with source_id, tier, url, etc.
   - Source metadata separated from correlation data
-- Database migrations enhanced
-  - `ensure_raw_items_table()` migration
-  - `ensure_event_external_fields()` migration
+- Database migration functions enhanced
+  - `ensure_raw_items_table()` migration function
+  - `ensure_event_external_fields()` migration function
   - Base table creation before migrations
 
 ### Technical
