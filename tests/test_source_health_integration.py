@@ -518,8 +518,8 @@ def test_ingest_batch_failure_non_db_fail_fast_writes_source_run(session, mocker
     
     session.commit()
     
-    # Mock get_raw_items_for_ingest to return items, then make iteration raise
-    # This simulates a batch-level failure from iteration (non-DB path)
+    # Mock the iteration of source_items to raise by making source_items itself a FailingIterator
+    # This ensures the exception occurs INSIDE the per-source try block (line 142) during iteration (line 143)
     from collections import defaultdict
     
     class FailingIterator:
@@ -534,24 +534,25 @@ def test_ingest_batch_failure_non_db_fail_fast_writes_source_run(session, mocker
                 raise RuntimeError("Simulated batch-level failure: iteration error")
             return iter(self.items)
     
-    def mock_get_raw_items(*args, **kwargs):
-        # Get the real items
-        from sentinel.database.raw_item_repo import get_raw_items_for_ingest
-        items = get_raw_items_for_ingest(*args, **kwargs)
-        # Group by source
-        items_by_source = defaultdict(list)
-        for item in items:
-            items_by_source[item.source_id].append(item)
-        # Make the first source's items a failing iterator
-        if items_by_source:
-            first_key = list(items_by_source.keys())[0]
-            items_by_source[first_key] = FailingIterator(items_by_source[first_key])
-        return items
+    # Mock defaultdict.items() to return a dict where the first source's value is a FailingIterator
+    # This way, when we do "for raw_item in source_items:" inside the per-source try, it will raise
+    call_count = [0]
+    original_items = defaultdict.items
     
-    mocker.patch(
-        "sentinel.runners.ingest_external.get_raw_items_for_ingest",
-        side_effect=mock_get_raw_items
-    )
+    def mock_items(self):
+        call_count[0] += 1
+        if call_count[0] == 1:  # First source batch
+            # Get normal items dict
+            result = dict(original_items(self))
+            # Replace first source's list with FailingIterator
+            if result:
+                first_key = list(result.keys())[0]
+                result[first_key] = FailingIterator(result[first_key])
+            return result.items()
+        # For subsequent sources, return normal items
+        return original_items(self)
+    
+    mocker.patch.object(defaultdict, 'items', mock_items)
     
     # Run ingest_external_main with fail_fast=True
     # This should raise an exception, but SourceRun should be created first

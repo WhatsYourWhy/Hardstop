@@ -292,8 +292,8 @@ def main(
                 items_events_created=source_events,
                 items_alerts_touched=source_alerts,
             )
-            session.commit()
-            source_run_written = True  # Mark as written
+            session.commit()  # Commit must succeed before marking as written
+            source_run_written = True  # Mark as written (only after successful commit)
             
             # NOW re-raise if fail_fast (after SourceRun is safely created)
             if fail_fast:
