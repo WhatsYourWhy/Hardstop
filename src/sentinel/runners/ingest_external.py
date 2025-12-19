@@ -133,6 +133,7 @@ def main(
         source_start_time = time.monotonic()
         source_error_msg = None
         ingest_status = "SUCCESS"
+        source_run_written = False  # Track if SourceRun was created in except block
         
         # Contract: One INGEST SourceRun per source_id per run_group_id, regardless of item failures.
         # Batch exceptions recorded as FAILURE status. Item-level exceptions increment source_errors
@@ -292,44 +293,44 @@ def main(
                 items_alerts_touched=source_alerts,
             )
             session.commit()
+            source_run_written = True  # Mark as written
             
             # NOW re-raise if fail_fast (after SourceRun is safely created)
             if fail_fast:
                 raise
-            # If not fail_fast, continue to next source (SourceRun already created in except block)
-            continue
         
-        # Calculate duration (only reached if no batch-level exception occurred)
-        source_duration = time.monotonic() - source_start_time
+        # Only create SourceRun if it wasn't already created in except block
+        if not source_run_written:
+            # Calculate duration (only reached if no batch-level exception occurred)
+            source_duration = time.monotonic() - source_start_time
+            
+            # Create INGEST phase SourceRun record for this source (v0.9, v1.0: guaranteed)
+            run_at_utc = datetime.now(timezone.utc).isoformat()
+            
+            # Determine error message
+            if source_errors > 0:
+                source_error_msg = f"{source_errors} error(s) during processing"
+            else:
+                source_error_msg = None
+            
+            create_source_run(
+                session,
+                run_group_id=run_group_id,
+                source_id=source_id,
+                phase="INGEST",
+                run_at_utc=run_at_utc,
+                status=ingest_status,
+                status_code=None,  # INGEST phase doesn't have HTTP status codes
+                error=source_error_msg,
+                duration_seconds=source_duration,
+                items_processed=source_processed,
+                items_suppressed=source_suppressed,
+                items_events_created=source_events,
+                items_alerts_touched=source_alerts,
+            )
+            session.commit()
         
-        # Create INGEST phase SourceRun record for this source (v0.9, v1.0: guaranteed)
-        # Always write INGEST run, even if source had 0 items (v1.0)
-        # Note: Batch-level failures are handled in except block above
-        run_at_utc = datetime.now(timezone.utc).isoformat()
-        
-        # Determine error message
-        if source_errors > 0:
-            source_error_msg = f"{source_errors} error(s) during processing"
-        else:
-            source_error_msg = None
-        
-        create_source_run(
-            session,
-            run_group_id=run_group_id,
-            source_id=source_id,
-            phase="INGEST",
-            run_at_utc=run_at_utc,
-            status=ingest_status,
-            status_code=None,  # INGEST phase doesn't have HTTP status codes
-            error=source_error_msg,
-            duration_seconds=source_duration,
-            items_processed=source_processed,
-            items_suppressed=source_suppressed,
-            items_events_created=source_events,
-            items_alerts_touched=source_alerts,
-        )
-        session.commit()
-        
+        # Log source summary (runs for both success and failure cases)
         logger.info(
             f"Source {source_id}: {source_processed} processed, {source_events} events, "
             f"{source_alerts} alerts, {source_suppressed} suppressed, {source_errors} errors"

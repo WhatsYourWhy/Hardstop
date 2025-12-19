@@ -495,3 +495,98 @@ def test_ingest_batch_failure_fail_fast_writes_source_run(session, mocker):
     assert our_run.duration_seconds is not None
     assert our_run.duration_seconds >= 0
 
+
+def test_ingest_batch_failure_non_db_fail_fast_writes_source_run(session, mocker):
+    """Test that non-DB batch-level exception with fail-fast writes SourceRun before re-raising (v1.0)."""
+    run_group_id = "test-group-batch-fail-fast-non-db"
+    source_id = "test_source"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create a raw item
+    save_raw_item(
+        session,
+        source_id=source_id,
+        tier="global",
+        candidate={
+            "canonical_id": "batch-fail-item-1",
+            "title": "Batch Fail Item",
+            "url": "https://example.com/batch-fail",
+            "published_at_utc": now,
+            "payload": {"title": "Batch Fail Item"},
+        },
+    )
+    
+    session.commit()
+    
+    # Mock get_raw_items_for_ingest to return items, then make iteration raise
+    # This simulates a batch-level failure from iteration (non-DB path)
+    from collections import defaultdict
+    
+    class FailingIterator:
+        """Iterator that raises on first iteration attempt."""
+        def __init__(self, items):
+            self.items = items
+            self._raised = False
+        
+        def __iter__(self):
+            if not self._raised:
+                self._raised = True
+                raise RuntimeError("Simulated batch-level failure: iteration error")
+            return iter(self.items)
+    
+    def mock_get_raw_items(*args, **kwargs):
+        # Get the real items
+        from sentinel.database.raw_item_repo import get_raw_items_for_ingest
+        items = get_raw_items_for_ingest(*args, **kwargs)
+        # Group by source
+        items_by_source = defaultdict(list)
+        for item in items:
+            items_by_source[item.source_id].append(item)
+        # Make the first source's items a failing iterator
+        if items_by_source:
+            first_key = list(items_by_source.keys())[0]
+            items_by_source[first_key] = FailingIterator(items_by_source[first_key])
+        return items
+    
+    mocker.patch(
+        "sentinel.runners.ingest_external.get_raw_items_for_ingest",
+        side_effect=mock_get_raw_items
+    )
+    
+    # Run ingest_external_main with fail_fast=True
+    # This should raise an exception, but SourceRun should be created first
+    with pytest.raises(RuntimeError, match="Simulated batch-level failure"):
+        ingest_external_main(
+            session=session,
+            source_id=source_id,
+            run_group_id=run_group_id,
+            fail_fast=True,
+        )
+    
+    # Commit to ensure SourceRun is persisted
+    session.commit()
+    
+    # Assert: INGEST SourceRun was created before exception was re-raised
+    runs = list_recent_runs(session, source_id=source_id, phase="INGEST")
+    assert len(runs) >= 1, f"Expected at least 1 INGEST SourceRun, got {len(runs)}"
+    
+    # Find the run with our run_group_id
+    our_run = None
+    for run in runs:
+        if run.run_group_id == run_group_id:
+            our_run = run
+            break
+    
+    assert our_run is not None, f"No INGEST SourceRun found with run_group_id={run_group_id}"
+    assert our_run.phase == "INGEST"
+    assert our_run.run_group_id == run_group_id
+    # Status should be FAILURE (batch-level exception occurred)
+    assert our_run.status == "FAILURE"
+    assert our_run.error is not None
+    assert "failure" in our_run.error.lower() or "iteration" in our_run.error.lower()
+    # Duration should be set (proves SourceRun was created)
+    assert our_run.duration_seconds is not None
+    assert our_run.duration_seconds >= 0
+    # Items processed should be 0 (batch failed before processing items)
+    assert our_run.items_processed == 0
+
