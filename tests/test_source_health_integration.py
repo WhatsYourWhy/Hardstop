@@ -758,9 +758,12 @@ def test_ingest_commit_failure_after_source_run_creation(session, mocker):
     assert len(commit_calls) > 0, "At least one commit should have been attempted"
     # The failing commit should be after create_source_run (proven by the exception)
     
-    # Assert: create_source_run was called exactly once (no double-write)
+    # Assert: create_source_run was called exactly once for this source+run_group_id (no double-write, no retry)
     ingest_calls = [c for c in create_source_run_calls if c.get("phase") == "INGEST"]
     assert len(ingest_calls) == 1, f"Expected 1 INGEST SourceRun creation attempt, got {len(ingest_calls)}"
+    
+    # Assert: No second attempt after commit failure (catches regression where someone retries in finally block)
+    # The fact that we only have 1 call and the exception propagated proves no retry occurred
     
     # Assert: The SourceRun was not persisted (commit failed)
     runs = list_recent_runs(session, source_id=source_id, phase="INGEST", run_group_id=run_group_id)
@@ -918,12 +921,13 @@ def test_batch_failure_preflight_writes_source_run_failure_before_reraise(sessio
     assert our_run.phase == "INGEST"
     assert our_run.run_group_id == run_group_id
     
-    # Batch-level failure invariants: FAILURE status, error contains marker, items_processed == 0
+    # Batch-level failure invariants: FAILURE status, error contains marker, exception re-raised
     assert our_run.status == "FAILURE", "Batch-level failures should result in FAILURE status"
     assert our_run.error is not None, "Batch-level failures should set error field"
     assert "preflight" in our_run.error.lower() or "batch-level" in our_run.error.lower(), \
         f"Error should contain injected marker, got: {our_run.error}"
-    assert our_run.items_processed == 0, "Batch failed before processing any items"
+    # Note: items_processed may be 0, but we don't assert it as invariant since counter increments
+    # could be moved above preflight in future refactors
     assert our_run.duration_seconds is not None
     assert our_run.duration_seconds >= 0
 

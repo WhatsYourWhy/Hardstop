@@ -38,22 +38,26 @@ def preflight_source_batch(source_id: str, source_items: List) -> None:
     Preflight checks for a source batch before processing items.
     
     Validates that the source batch is ready for processing. This provides a stable
-    seam for batch-level failure injection in tests while performing real validation.
+    seam for batch-level failure injection in tests while performing minimal validation.
+    
+    Keeps checks minimal and non-opinionated to avoid introducing new failure modes
+    in normal runs (quiet feeds, weird adapters, etc.). Empty batches are normal.
     
     Args:
         source_id: Source ID being processed
         source_items: List of raw items for this source
         
     Raises:
-        ValueError: If source_id is empty or source_items is invalid
+        ValueError: If source_id is empty or source_items is None
     """
     if not source_id or not source_id.strip():
         raise ValueError(f"Invalid source_id: {source_id}")
     
-    if not isinstance(source_items, (list, tuple)):
-        raise ValueError(f"source_items must be a list or tuple, got {type(source_items)}")
+    if source_items is None:
+        raise ValueError("source_items cannot be None")
     
-    # Note: Empty lists are valid (source has no items to process)
+    # Note: Empty lists are valid (quiet sources are normal)
+    # Note: We don't validate list/tuple type to avoid breaking weird adapters
 
 
 def main(
@@ -164,9 +168,8 @@ def main(
         # - SUCCESS = batch loop completed (even if some items errored)
         # - FAILURE = batch-level exception prevented completion
         # 
-        # Persistence caveat: If DB commit fails after SourceRun creation, the run record may not
-        # be persisted. We attempt exactly once; if commit fails, run tracking may be incomplete.
-        # This is acceptable for personal use but may require fallback logging for production.
+        # Persistence caveat: We attempt to write one INGEST SourceRun per source per run_group_id;
+        # if the DB commit fails, the run record may not persist.
         # Wrap entire source batch in try/except to guarantee INGEST SourceRun row (v1.0)
         try:
             # Preflight checks (provides stable seam for batch-level failure injection)

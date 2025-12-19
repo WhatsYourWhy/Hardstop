@@ -16,7 +16,7 @@ Sentinel solves the problem of information overload from multiple alert sources.
 - **Local-first**: All data stored locally in SQLite, no cloud dependencies
 - **Deterministic**: Same input = same output, fully auditable
 - **Self-evaluating**: Exit codes and health checks tell you when something's wrong
-- **Production-shaped**: Built for reliability with source health tracking and guaranteed failure reporting (attempts exactly once; DB commit failures may result in incomplete tracking)
+- **Production-shaped**: Built for reliability with source health tracking and guaranteed failure reporting (we attempt to write one INGEST SourceRun per source per run_group_id; if the DB commit fails, the run record may not persist)
 
 ## Status
 

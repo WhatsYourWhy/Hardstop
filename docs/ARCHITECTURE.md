@@ -305,7 +305,7 @@ External Sources → Fetch → Raw Items → Normalize → Suppression → Entit
   - Handles correlation and updates
   - Creates INGEST SourceRun records per source (v0.9)
   - Attempts SourceRun creation even on failure (v1.0)
-  - **Persistence caveat**: If DB commit fails after SourceRun creation, the run record may not be persisted. We attempt exactly once; if commit fails, run tracking may be incomplete. This is acceptable for personal use but may require fallback logging for production.
+  - **Persistence caveat**: We attempt to write one INGEST SourceRun per source per run_group_id; if the DB commit fails, the run record may not persist.
 
 **Key Design:**
 - Each runner is a standalone `main()` function
