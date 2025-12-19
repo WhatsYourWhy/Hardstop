@@ -1,6 +1,7 @@
 """Runner for ingesting external raw items into events and alerts."""
 
 import json
+import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -41,6 +42,7 @@ def main(
     no_suppress: bool = False,
     explain_suppress: bool = False,
     run_group_id: Optional[str] = None,
+    fail_fast: bool = False,
 ) -> Dict[str, int]:
     """
     Main ingestion runner for external raw items.
@@ -61,6 +63,7 @@ def main(
         no_suppress: If True, bypass suppression entirely (v0.8)
         explain_suppress: If True, log suppression decisions (v0.8)
         run_group_id: Optional UUID linking related runs (v0.9). If None, generates one.
+        fail_fast: If True, stop processing on first source failure (v1.0)
         
     Returns:
         Dict with counts: {"processed": N, "events": M, "alerts": K, "errors": E, "suppressed": S}
@@ -106,6 +109,9 @@ def main(
     for raw_item in raw_items:
         items_by_source[raw_item.source_id].append(raw_item)
     
+    # Note: Sources with 0 items to ingest will have empty list in items_by_source
+    # We still write INGEST SourceRun for them (v1.0: explicit "ingest skipped")
+    
     stats = {
         "processed": 0,
         "events": 0,
@@ -123,133 +129,166 @@ def main(
         source_alerts = 0
         source_errors = 0
         
-        for raw_item in source_items:
+        # Start timer for this source batch (v1.0)
+        source_start_time = time.monotonic()
+        source_error_msg = None
+        ingest_status = "SUCCESS"
+        
+        # Wrap entire source batch in try/except to guarantee INGEST SourceRun row (v1.0)
         try:
-            # Parse raw payload
-            payload = json.loads(raw_item.raw_payload_json)
-            
-            # Build candidate dict
-            candidate = {
-                "canonical_id": raw_item.canonical_id,
-                "title": raw_item.title,
-                "url": raw_item.url,
-                "published_at_utc": raw_item.published_at_utc,
-                "payload": payload,
-            }
-            
-            # Get source config for metadata (with v0.7 defaults applied)
-            source_config_raw = all_sources.get(raw_item.source_id, {})
-            source_config = get_source_with_defaults(source_config_raw) if source_config_raw else {}
-            
-            # Normalize to event (injects tier/trust_tier/classification_floor/weighting_bias)
-            event = normalize_external_event(
-                raw_item_candidate=candidate,
-                source_id=raw_item.source_id,
-                tier=raw_item.tier,
-                raw_id=raw_item.raw_id,
-                source_config=source_config,
-            )
-            
-            # Evaluate suppression (v0.8)
-            suppressed = False
-            if not no_suppress:
-                # Get source-specific suppression rules
-                source_rules: List[SuppressionRule] = []
-                source_suppress_rules = get_suppression_rules_for_source(source_config)
-                for rule_dict in source_suppress_rules:
-                    try:
-                        source_rules.append(SuppressionRule(**rule_dict))
-                    except Exception as e:
-                        logger.warning(f"Invalid source suppression rule for {raw_item.source_id}: {e}")
-                
-                # Evaluate suppression
-                suppression_result = evaluate_suppression(
-                    source_id=raw_item.source_id,
-                    tier=raw_item.tier,
-                    item=event,
-                    global_rules=global_rules,
-                    source_rules=source_rules,
-                )
-                
-                if suppression_result.is_suppressed:
-                    suppressed = True
-                    suppressed_at_utc = datetime.now(timezone.utc).isoformat()
+            for raw_item in source_items:
+                try:
+                    # Parse raw payload
+                    payload = json.loads(raw_item.raw_payload_json)
                     
-                    # Mark raw item as suppressed
-                    mark_raw_item_suppressed(
-                        session,
-                        raw_item.raw_id,
-                        suppression_result.primary_rule_id or "unknown",
-                        suppression_result.matched_rule_ids,
-                        suppressed_at_utc,
-                        "INGEST_EXTERNAL",
+                    # Build candidate dict
+                    candidate = {
+                        "canonical_id": raw_item.canonical_id,
+                        "title": raw_item.title,
+                        "url": raw_item.url,
+                        "published_at_utc": raw_item.published_at_utc,
+                        "payload": payload,
+                    }
+                    
+                    # Get source config for metadata (with v0.7 defaults applied)
+                    source_config_raw = all_sources.get(raw_item.source_id, {})
+                    source_config = get_source_with_defaults(source_config_raw) if source_config_raw else {}
+                    
+                    # Normalize to event (injects tier/trust_tier/classification_floor/weighting_bias)
+                    event = normalize_external_event(
+                        raw_item_candidate=candidate,
+                        source_id=raw_item.source_id,
+                        tier=raw_item.tier,
+                        raw_id=raw_item.raw_id,
+                        source_config=source_config,
                     )
                     
-                    # Save event with suppression metadata (but don't create alert)
-                    save_event(
-                        session,
-                        event,
-                        suppression_primary_rule_id=suppression_result.primary_rule_id,
-                        suppression_rule_ids=suppression_result.matched_rule_ids,
-                        suppressed_at_utc=suppressed_at_utc,
-                    )
-                    session.commit()
-                    
-                    source_suppressed += 1
-                    source_events += 1  # Event is still created for audit
-                    stats["suppressed"] += 1
-                    stats["events"] += 1
-                    
-                    if explain_suppress:
-                        logger.info(
-                            f"Suppressed raw_item {raw_item.raw_id} (rule: {suppression_result.primary_rule_id}, "
-                            f"matched: {suppression_result.matched_rule_ids})"
+                    # Evaluate suppression (v0.8)
+                    suppressed = False
+                    if not no_suppress:
+                        # Get source-specific suppression rules
+                        source_rules: List[SuppressionRule] = []
+                        source_suppress_rules = get_suppression_rules_for_source(source_config)
+                        for rule_dict in source_suppress_rules:
+                            try:
+                                source_rules.append(SuppressionRule(**rule_dict))
+                            except Exception as e:
+                                logger.warning(f"Invalid source suppression rule for {raw_item.source_id}: {e}")
+                        
+                        # Evaluate suppression
+                        suppression_result = evaluate_suppression(
+                            source_id=raw_item.source_id,
+                            tier=raw_item.tier,
+                            item=event,
+                            global_rules=global_rules,
+                            source_rules=source_rules,
                         )
+                        
+                        if suppression_result.is_suppressed:
+                            suppressed = True
+                            suppressed_at_utc = datetime.now(timezone.utc).isoformat()
+                            
+                            # Mark raw item as suppressed
+                            mark_raw_item_suppressed(
+                                session,
+                                raw_item.raw_id,
+                                suppression_result.primary_rule_id or "unknown",
+                                suppression_result.matched_rule_ids,
+                                suppressed_at_utc,
+                                "INGEST_EXTERNAL",
+                            )
+                            
+                            # Save event with suppression metadata (but don't create alert)
+                            save_event(
+                                session,
+                                event,
+                                suppression_primary_rule_id=suppression_result.primary_rule_id,
+                                suppression_rule_ids=suppression_result.matched_rule_ids,
+                                suppressed_at_utc=suppressed_at_utc,
+                            )
+                            session.commit()
+                            
+                            source_suppressed += 1
+                            source_events += 1  # Event is still created for audit
+                            stats["suppressed"] += 1
+                            stats["events"] += 1
+                            
+                            if explain_suppress:
+                                logger.info(
+                                    f"Suppressed raw_item {raw_item.raw_id} (rule: {suppression_result.primary_rule_id}, "
+                                    f"matched: {suppression_result.matched_rule_ids})"
+                                )
+                            
+                            source_processed += 1
+                            stats["processed"] += 1
+                            continue  # Skip alert creation
+                    
+                    # Not suppressed - proceed with normal flow
+                    # Persist event
+                    save_event(session, event)
+                    session.commit()
+                    source_events += 1
+                    stats["events"] += 1
+                    logger.debug(f"Created event {event['event_id']} from raw_item {raw_item.raw_id}")
+                    
+                    # Link to network
+                    event = link_event_to_network(event, session=session)
+                    
+                    # Build alert (handles correlation internally)
+                    alert = build_basic_alert(event, session=session)
+                    source_alerts += 1
+                    stats["alerts"] += 1
+                    logger.debug(f"Created/updated alert {alert.alert_id} for event {event['event_id']}")
+                    
+                    # Mark raw item as normalized
+                    mark_raw_item_status(session, raw_item.raw_id, "NORMALIZED")
+                    session.commit()
                     
                     source_processed += 1
                     stats["processed"] += 1
-                    continue  # Skip alert creation
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"Failed to process raw_item {raw_item.raw_id}: {error_msg}", exc_info=True)
+                    try:
+                        session.rollback()  # Rollback failed transaction
+                        mark_raw_item_status(session, raw_item.raw_id, "FAILED", error=error_msg)
+                        session.commit()
+                    except Exception as rollback_error:
+                        logger.error(f"Failed to rollback and mark status: {rollback_error}")
+                        session.rollback()
+                    source_errors += 1
+                    stats["errors"] += 1
             
-            # Not suppressed - proceed with normal flow
-            # Persist event
-            save_event(session, event)
-            session.commit()
-            source_events += 1
-            stats["events"] += 1
-            logger.debug(f"Created event {event['event_id']} from raw_item {raw_item.raw_id}")
+            # Source batch completed successfully
+            source_duration = time.monotonic() - source_start_time
             
-            # Link to network
-            event = link_event_to_network(event, session=session)
+        except Exception as batch_error:
+            # Source batch failed catastrophically (v1.0)
+            source_duration = time.monotonic() - source_start_time
+            ingest_status = "FAILURE"
+            error_msg = str(batch_error)
+            # Truncate error to 1000 chars for database safety
+            source_error_msg = error_msg[:1000] if len(error_msg) > 1000 else error_msg
+            logger.error(f"Source batch {source_id} failed: {error_msg}", exc_info=True)
             
-            # Build alert (handles correlation internally)
-            alert = build_basic_alert(event, session=session)
-            source_alerts += 1
-            stats["alerts"] += 1
-            logger.debug(f"Created/updated alert {alert.alert_id} for event {event['event_id']}")
-            
-            # Mark raw item as normalized
-            mark_raw_item_status(session, raw_item.raw_id, "NORMALIZED")
-            session.commit()
-            
-            source_processed += 1
-            stats["processed"] += 1
-            
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Failed to process raw_item {raw_item.raw_id}: {error_msg}", exc_info=True)
-            try:
-                session.rollback()  # Rollback failed transaction
-                mark_raw_item_status(session, raw_item.raw_id, "FAILED", error=error_msg)
-                session.commit()
-            except Exception as rollback_error:
-                logger.error(f"Failed to rollback and mark status: {rollback_error}")
-                session.rollback()
-            source_errors += 1
-            stats["errors"] += 1
+            # If fail_fast, re-raise to stop processing
+            if fail_fast:
+                raise
         
-        # Create INGEST phase SourceRun record for this source (v0.9)
+        # Create INGEST phase SourceRun record for this source (v0.9, v1.0: guaranteed)
+        # Always write INGEST run, even if source had 0 items or failed (v1.0)
         run_at_utc = datetime.now(timezone.utc).isoformat()
-        ingest_status = "SUCCESS" if source_errors == 0 else "FAILURE"
+        source_duration = time.monotonic() - source_start_time
+        
+        # Determine error message
+        if ingest_status == "FAILURE":
+            # Error already set in except block
+            pass
+        elif source_errors > 0:
+            source_error_msg = f"{source_errors} error(s) during processing"
+        else:
+            source_error_msg = None
         
         create_source_run(
             session,
@@ -259,8 +298,8 @@ def main(
             run_at_utc=run_at_utc,
             status=ingest_status,
             status_code=None,  # INGEST phase doesn't have HTTP status codes
-            error=None if source_errors == 0 else f"{source_errors} errors during processing",
-            duration_seconds=None,  # Could track per-source duration if needed
+            error=source_error_msg,
+            duration_seconds=source_duration,
             items_processed=source_processed,
             items_suppressed=source_suppressed,
             items_events_created=source_events,

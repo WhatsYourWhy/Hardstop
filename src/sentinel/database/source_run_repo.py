@@ -4,7 +4,6 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
-from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from sentinel.database.schema import SourceRun

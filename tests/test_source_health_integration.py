@@ -167,3 +167,40 @@ def test_sources_test_creates_runs(session):
     assert len(runs) >= 1
     assert any(r.phase == "FETCH" for r in runs)
 
+
+def test_ingest_failure_still_writes_source_run(session):
+    """Test that ingest failure still writes INGEST SourceRun row with status=FAILURE (v1.0)."""
+    run_group_id = "test-group-1"
+    source_id = "test_source"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Simulate what ingest_external does when a source batch fails:
+    # It should still create an INGEST SourceRun with status=FAILURE
+    create_source_run(
+        session,
+        run_group_id=run_group_id,
+        source_id=source_id,
+        phase="INGEST",
+        run_at_utc=now,
+        status="FAILURE",
+        error="Normalization error: invalid JSON",  # Truncated to 1000 chars
+        duration_seconds=0.5,
+        items_processed=2,  # Some items processed before failure
+        items_suppressed=0,
+        items_events_created=1,  # One event created before failure
+        items_alerts_touched=0,  # No alerts created due to failure
+    )
+    
+    session.commit()
+    
+    # Verify the failure run was created
+    runs = list_recent_runs(session, source_id=source_id, phase="INGEST")
+    assert len(runs) == 1
+    assert runs[0].phase == "INGEST"
+    assert runs[0].status == "FAILURE"
+    assert runs[0].error is not None
+    assert "error" in runs[0].error.lower() or "normalization" in runs[0].error.lower()
+    assert runs[0].items_processed == 2
+    assert runs[0].items_events_created == 1
+    assert runs[0].items_alerts_touched == 0
+

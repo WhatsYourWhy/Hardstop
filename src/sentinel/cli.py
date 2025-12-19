@@ -1,6 +1,8 @@
 """CLI entrypoint for Sentinel agent."""
 
 import argparse
+import shutil
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -25,17 +27,16 @@ from sentinel.database.migrate import (
     ensure_trust_tier_columns,
 )
 from sentinel.database.raw_item_repo import save_raw_item
-from sentinel.database.schema import Alert, Event, RawItem
-from sentinel.database.source_run_repo import create_source_run
+from sentinel.database.schema import Alert, Event, RawItem, SourceRun
+from sentinel.database.source_run_repo import create_source_run, list_recent_runs
 from sentinel.database.sqlite_client import session_context
-from sentinel.retrieval.fetcher import FetchResult
 from sentinel.output.daily_brief import (
     _parse_since,
     generate_brief,
     render_json,
     render_markdown,
 )
-from sentinel.retrieval.fetcher import SourceFetcher
+from sentinel.retrieval.fetcher import FetchResult, SourceFetcher
 from sentinel.runners.ingest_external import main as ingest_external_main
 from sentinel.runners.load_network import main as load_network_main
 from sentinel.runners.run_demo import main as run_demo_main
@@ -184,9 +185,10 @@ def cmd_sources_test(args: argparse.Namespace) -> None:
                 source_id=args.source_id,
                 since=args.since,
                 no_suppress=False,
-                explain_suppress=False,
-            )
-            cmd_ingest_external(ingest_args, run_group_id=run_group_id)
+        explain_suppress=False,
+        fail_fast=getattr(args, 'fail_fast', False),
+    )
+    cmd_ingest_external(ingest_args, run_group_id=run_group_id)
     
     except ValueError as e:
         print(f"Error: {e}")
@@ -445,6 +447,7 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
                 no_suppress=getattr(args, 'no_suppress', False),
                 explain_suppress=getattr(args, 'explain_suppress', False),
                 run_group_id=run_group_id,
+                fail_fast=getattr(args, 'fail_fast', False),
             )
             
             print(f"Ingestion complete:")
@@ -461,11 +464,16 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    """Convenience command: fetch → ingest external → brief."""
+    """Convenience command: fetch → ingest external → brief → evaluate status."""
     since_str = args.since or "24h"
+    stale_threshold = args.stale if hasattr(args, 'stale') else "48h"
+    strict_mode = getattr(args, 'strict', False)
     
     # Generate single run_group_id for entire execution (v0.9)
     run_group_id = str(uuid.uuid4())
+    
+    config = load_config()
+    sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
     
     # Step 1: Fetch
     print("Step 1: Fetching from sources...")
@@ -477,7 +485,11 @@ def cmd_run(args: argparse.Namespace) -> None:
         dry_run=False,
         fail_fast=False,
     )
-    cmd_fetch(fetch_args, run_group_id=run_group_id)
+    try:
+        cmd_fetch(fetch_args, run_group_id=run_group_id)
+    except Exception as e:
+        logger.error(f"Fetch failed: {e}", exc_info=True)
+        # Will be caught by run status evaluation
     
     # Step 2: Ingest external
     print("\nStep 2: Ingesting external items...")
@@ -488,8 +500,13 @@ def cmd_run(args: argparse.Namespace) -> None:
         since=since_str,
         no_suppress=getattr(args, 'no_suppress', False),
         explain_suppress=False,
+        fail_fast=getattr(args, 'fail_fast', False),
     )
-    cmd_ingest_external(ingest_args, run_group_id=run_group_id)
+    try:
+        cmd_ingest_external(ingest_args, run_group_id=run_group_id)
+    except Exception as e:
+        logger.error(f"Ingest failed: {e}", exc_info=True)
+        # Will be caught by run status evaluation
     
     # Step 3: Brief
     print("\nStep 3: Generating brief...")
@@ -500,7 +517,145 @@ def cmd_run(args: argparse.Namespace) -> None:
         limit=20,
         include_class0=False,
     )
-    cmd_brief(brief_args)
+    try:
+        cmd_brief(brief_args)
+    except Exception as e:
+        logger.error(f"Brief failed: {e}", exc_info=True)
+    
+    # Step 4: Evaluate run status (v1.0)
+    print("\nStep 4: Evaluating run status...")
+    
+    # Collect fetch results from SourceRun table
+    fetch_results: Optional[List[FetchResult]] = None
+    ingest_runs: Optional[List[SourceRun]] = None
+    doctor_findings: Dict = {}
+    stale_sources: List[str] = []
+    
+    try:
+        with session_context(sqlite_path) as session:
+            # Get FETCH phase runs for this run_group_id
+            fetch_runs = list_recent_runs(session, limit=100, phase="FETCH")
+            fetch_runs = [r for r in fetch_runs if r.run_group_id == run_group_id]
+            
+            # Convert to FetchResult format
+            fetch_results = []
+            for run in fetch_runs:
+                fetch_results.append(
+                    FetchResult(
+                        source_id=run.source_id,
+                        fetched_at_utc=run.run_at_utc,
+                        status=run.status,
+                        status_code=run.status_code,
+                        error=run.error,
+                        duration_seconds=run.duration_seconds,
+                        items=[],  # We don't store items in FetchResult for status evaluation
+                    )
+                )
+            
+            # Get INGEST phase runs for this run_group_id
+            ingest_runs = list_recent_runs(session, limit=100, phase="INGEST")
+            ingest_runs = [r for r in ingest_runs if r.run_group_id == run_group_id]
+            
+            # Calculate stale sources
+            try:
+                stale_hours = _parse_since(stale_threshold)
+                if stale_hours:
+                    stale_threshold_dt = datetime.now(timezone.utc) - timedelta(hours=stale_hours)
+                    stale_threshold_iso = stale_threshold_dt.isoformat()
+                    all_fetch_runs = list_recent_runs(session, limit=1000, phase="FETCH")
+                    source_last_success = {}
+                    for run in all_fetch_runs:
+                        if run.status == "SUCCESS":
+                            if run.source_id not in source_last_success:
+                                source_last_success[run.source_id] = run.run_at_utc
+                    
+                    for source_id, last_success_utc in source_last_success.items():
+                        if last_success_utc < stale_threshold_iso:
+                            stale_sources.append(source_id)
+            except Exception as e:
+                logger.warning(f"Error calculating stale sources: {e}")
+    except Exception as e:
+        logger.error(f"Error collecting run data: {e}", exc_info=True)
+    
+    # Run doctor checks to get findings (v1.0)
+    try:
+        # Check config
+        try:
+            sources_config = load_sources_config()
+            all_sources = get_all_sources(sources_config)
+            enabled_sources = [s for s in all_sources if s.get("enabled", True)]
+            doctor_findings["enabled_sources_count"] = len(enabled_sources)
+        except FileNotFoundError:
+            doctor_findings["config_error"] = "sources.yaml not found"
+        except Exception as e:
+            doctor_findings["config_error"] = f"Config parse error: {str(e)}"
+        
+        # Check suppression config
+        try:
+            from sentinel.config.loader import load_suppression_config
+            suppression_config = load_suppression_config()
+            suppression_warnings = []
+            if not suppression_config.get("enabled", True):
+                suppression_warnings.append("Suppression disabled")
+            # Check for duplicate rule IDs (simplified check)
+            rules = suppression_config.get("rules", [])
+            rule_ids = [r.get("id") for r in rules if isinstance(r, dict) and r.get("id")]
+            if len(rule_ids) != len(set(rule_ids)):
+                suppression_warnings.append("Duplicate rule IDs found")
+            if suppression_warnings:
+                doctor_findings["suppression_warnings"] = suppression_warnings
+        except FileNotFoundError:
+            pass  # Suppression config optional
+        except Exception as e:
+            logger.warning(f"Error checking suppression config: {e}")
+        
+        # Check schema drift (check for required tables)
+        try:
+            import sqlite3
+            conn = sqlite3.connect(sqlite_path)
+            try:
+                required_tables = ["raw_items", "events", "alerts", "source_runs"]
+                missing_tables = []
+                for table in required_tables:
+                    cur = conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name=?;",
+                        (table,)
+                    )
+                    if not cur.fetchone():
+                        missing_tables.append(f"table: {table}")
+                if missing_tables:
+                    doctor_findings["schema_drift"] = missing_tables
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning(f"Error checking schema: {e}")
+    except Exception as e:
+        logger.warning(f"Error running doctor checks: {e}")
+    
+    # Evaluate run status (v1.0)
+    stale_hours = _parse_since(stale_threshold) if stale_threshold else 48
+    exit_code, messages = evaluate_run_status(
+        fetch_results=fetch_results,
+        ingest_runs=ingest_runs,
+        doctor_findings=doctor_findings,
+        stale_sources=stale_sources,
+        stale_threshold_hours=stale_hours or 48,
+        strict=strict_mode,
+    )
+    
+    # Print footer
+    status_names = {0: "HEALTHY", 1: "WARNING", 2: "BROKEN"}
+    status_name = status_names.get(exit_code, "UNKNOWN")
+    print(f"\n{'=' * 50}")
+    print(f"Run status: {status_name}")
+    if messages:
+        print("\nTop issues:")
+        for msg in messages[:3]:
+            print(f"  - {msg}")
+    print(f"{'=' * 50}\n")
+    
+    # Exit with code
+    sys.exit(exit_code)
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
@@ -811,6 +966,55 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         warnings.append(f"Source health check error: {e}")
         print(f"  [WARN] Source health check error: {e}")
     
+    # C2: Last run group summary (v1.0)
+    print("\n[6] Last Run Group Summary...")
+    try:
+        config = load_config()
+        sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+        db_path = Path(sqlite_path)
+        
+        if db_path.exists():
+            try:
+                with session_context(sqlite_path) as session:
+                    # Get most recent run_group_id
+                    most_recent_run = session.query(SourceRun).order_by(SourceRun.run_at_utc.desc()).first()
+                    if most_recent_run:
+                        run_group_id = most_recent_run.run_group_id
+                        print(f"  [INFO] Most recent run_group_id: {run_group_id[:8]}...")
+                        
+                        # Get all runs for this group
+                        group_runs = session.query(SourceRun).filter(
+                            SourceRun.run_group_id == run_group_id
+                        ).all()
+                        
+                        fetch_runs = [r for r in group_runs if r.phase == "FETCH"]
+                        ingest_runs = [r for r in group_runs if r.phase == "INGEST"]
+                        
+                        fetch_success = sum(1 for r in fetch_runs if r.status == "SUCCESS")
+                        fetch_fail = sum(1 for r in fetch_runs if r.status == "FAILURE")
+                        fetch_quiet = sum(1 for r in fetch_runs if r.status == "SUCCESS" and r.items_fetched == 0)
+                        
+                        ingest_success = sum(1 for r in ingest_runs if r.status == "SUCCESS")
+                        ingest_fail = sum(1 for r in ingest_runs if r.status == "FAILURE")
+                        
+                        total_alerts_touched = sum(r.items_alerts_touched for r in ingest_runs)
+                        total_suppressed = sum(r.items_suppressed for r in ingest_runs)
+                        
+                        print(f"  [INFO] Fetch: {fetch_success} success / {fetch_fail} fail / {fetch_quiet} quiet success")
+                        print(f"  [INFO] Ingest: {ingest_success} success / {ingest_fail} fail")
+                        if total_alerts_touched > 0:
+                            print(f"  [INFO] Alerts touched: {total_alerts_touched}")
+                        if total_suppressed > 0:
+                            print(f"  [INFO] Suppressed: {total_suppressed}")
+                    else:
+                        print("  [INFO] No run data available. Run 'sentinel run --since 24h' first.")
+            except Exception as e:
+                print(f"  [WARN] Error retrieving last run group: {e}")
+        else:
+            print("  [INFO] Database not found - no run data available")
+    except Exception as e:
+        print(f"  [WARN] Error checking last run group: {e}")
+    
     # Summary
     print("\n" + "=" * 50)
     if issues:
@@ -827,6 +1031,143 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     
     if not issues and not warnings:
         print("\n[OK] All checks passed!")
+    
+    # C1: What would I do next? (v1.0)
+    print("\n" + "=" * 50)
+    print("What would I do next?")
+    print("-" * 50)
+    
+    next_action = None
+    
+    # Priority 1: Schema drift
+    if issues:
+        for issue in issues:
+            if "schema drift" in issue.lower() or "missing" in issue.lower():
+                next_action = "Delete sentinel.db and rerun `sentinel run --since 24h`"
+                break
+    
+    # Priority 2: Stale sources
+    if not next_action:
+        for warning in warnings:
+            if "stale" in warning.lower():
+                # Try to get a stale source ID
+                try:
+                    config = load_config()
+                    sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+                    with session_context(sqlite_path) as session:
+                        from sentinel.database.source_run_repo import get_all_source_health
+                        health_list = get_all_source_health(session, lookback_n=10)
+                        stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+                        stale_cutoff_iso = stale_cutoff.isoformat()
+                        for health in health_list:
+                            last_success = health.get("last_success_utc")
+                            if not last_success or last_success < stale_cutoff_iso:
+                                source_id = health.get("source_id")
+                                if source_id:
+                                    next_action = f"Run `sentinel sources test {source_id} --since 72h`"
+                                    break
+                except Exception:
+                    pass
+                if not next_action:
+                    next_action = "Run `sentinel sources test <id> --since 72h` for stale sources"
+                break
+    
+    # Priority 3: All fetch failing
+    if not next_action:
+        for issue in issues:
+            if "failed" in issue.lower() and "fetch" in issue.lower():
+                next_action = "Check network / user agent / endpoint URLs in config/sources.yaml"
+                break
+    
+    # Priority 4: Suppression config invalid
+    if not next_action:
+        for warning in warnings:
+            if "suppression" in warning.lower() and ("invalid" in warning.lower() or "regex" in warning.lower()):
+                # Try to extract rule ID
+                import re
+                rule_match = re.search(r'rule[:\s]+([^\s,]+)', warning, re.IGNORECASE)
+                if rule_match:
+                    rule_id = rule_match.group(1)
+                    next_action = f"Fix suppression.yaml regex: {rule_id}"
+                else:
+                    next_action = "Fix suppression.yaml configuration"
+                break
+    
+    # Priority 5: Config error
+    if not next_action:
+        for issue in issues:
+            if "config" in issue.lower() or "sources.yaml" in issue.lower():
+                next_action = "Fix config/sources.yaml or config/suppression.yaml"
+                break
+    
+    # Default: all good
+    if not next_action:
+        next_action = "System is healthy. Run `sentinel run --since 24h` to fetch and process new data."
+    
+    print(f"  → {next_action}")
+    print("=" * 50)
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    """Initialize Sentinel configuration files from examples (v1.0)."""
+    config_dir = Path("config")
+    config_dir.mkdir(exist_ok=True)
+    
+    sources_example = config_dir / "sources.example.yaml"
+    sources_config = config_dir / "sources.yaml"
+    suppression_example = config_dir / "suppression.example.yaml"
+    suppression_config = config_dir / "suppression.yaml"
+    
+    created = []
+    skipped = []
+    
+    # Check if example files exist
+    if not sources_example.exists():
+        logger.error(f"Example file not found: {sources_example}")
+        logger.error("Please ensure config/sources.example.yaml exists")
+        return
+    
+    if not suppression_example.exists():
+        logger.error(f"Example file not found: {suppression_example}")
+        logger.error("Please ensure config/suppression.example.yaml exists")
+        return
+    
+    # Create sources.yaml
+    if sources_config.exists() and not args.force:
+        skipped.append("sources.yaml (already exists, use --force to overwrite)")
+    else:
+        try:
+            shutil.copy(sources_example, sources_config)
+            created.append("sources.yaml")
+            print(f"Created {sources_config}")
+        except Exception as e:
+            logger.error(f"Failed to create sources.yaml: {e}")
+            return
+    
+    # Create suppression.yaml
+    if suppression_config.exists() and not args.force:
+        skipped.append("suppression.yaml (already exists, use --force to overwrite)")
+    else:
+        try:
+            shutil.copy(suppression_example, suppression_config)
+            created.append("suppression.yaml")
+            print(f"Created {suppression_config}")
+        except Exception as e:
+            logger.error(f"Failed to create suppression.yaml: {e}")
+            return
+    
+    # Summary
+    if created:
+        print(f"\n✓ Initialized {len(created)} config file(s): {', '.join(created)}")
+        print("  Next steps:")
+        print("  1. Review and customize config/sources.yaml")
+        print("  2. Review and customize config/suppression.yaml")
+        print("  3. Run: sentinel run --since 24h")
+    
+    if skipped:
+        print(f"\n⚠ Skipped {len(skipped)} file(s):")
+        for item in skipped:
+            print(f"  - {item}")
 
 
 def cmd_brief(args: argparse.Namespace) -> None:
@@ -1013,6 +1354,11 @@ def main() -> None:
         action="store_true",
         help="Print suppression decisions for each suppressed item (v0.8)",
     )
+    ingest_external_parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop processing on first source failure (v1.0)",
+    )
     ingest_external_parser.set_defaults(func=cmd_ingest_external)
     
     # run command
@@ -1027,6 +1373,22 @@ def main() -> None:
         "--no-suppress",
         action="store_true",
         help="Bypass suppression entirely (v0.8)",
+    )
+    run_parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="Stop processing on first source failure (v1.0)",
+    )
+    run_parser.add_argument(
+        "--stale",
+        type=str,
+        default="48h",
+        help="Threshold for stale sources (e.g., 48h, 72h) (v1.0)",
+    )
+    run_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Treat warnings as broken (exit code 2) (v1.0)",
     )
     run_parser.set_defaults(func=cmd_run)
     
@@ -1066,6 +1428,15 @@ def main() -> None:
     # doctor command
     doctor_parser = subparsers.add_parser("doctor", help="Run health checks on Sentinel system")
     doctor_parser.set_defaults(func=cmd_doctor)
+    
+    # init command (v1.0)
+    init_parser = subparsers.add_parser("init", help="Initialize Sentinel configuration files from examples (v1.0)")
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing config files",
+    )
+    init_parser.set_defaults(func=cmd_init)
     
     args = parser.parse_args()
     

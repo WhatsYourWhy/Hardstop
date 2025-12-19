@@ -1,0 +1,100 @@
+version: 1
+
+# Default settings applied to all sources unless overridden
+defaults:
+  enabled: true  # Sources are enabled by default
+  max_items_per_fetch: 50  # Maximum items to fetch per source per run
+  timeout_seconds: 20  # HTTP request timeout
+  user_agent: "sentinel-agent/1.0 (YourOrg; contact: you@example.com)"  # User-Agent header for HTTP requests
+  rate_limit:
+    per_host_min_seconds: 2  # Minimum seconds between requests to same host
+    jitter_seconds: 1  # Random jitter to avoid synchronized requests
+  dedupe:
+    strategy: "canonical_id_or_hash"  # Deduplication strategy
+
+# Source tiers: Global > Regional > Local
+# - Global: Nationwide or international sources (e.g., NWS national alerts, FDA recalls)
+# - Regional: State or multi-state sources (e.g., NWS state alerts, regional USCG feeds)
+# - Local: City or port-specific sources (e.g., local USCG notices)
+tiers:
+  global:
+    # Example: NWS Active Alerts (National)
+    - id: nws_active_us
+      type: nws_alerts  # Adapter type: nws_alerts, rss, atom
+      enabled: true
+      tier: global
+      url: "https://api.weather.gov/alerts/active"
+      tags: ["weather", "disruption"]
+      geo:
+        country: "US"
+      
+      # Trust tier (1-3): Reliability/authority of source
+      # - 1: Low trust (e.g., unverified feeds, user-generated content)
+      # - 2: Medium trust (default, most sources)
+      # - 3: High trust (official government sources, verified APIs)
+      trust_tier: 3
+      
+      # Classification floor (0-2): Minimum alert classification level
+      # - 0: No floor (default, classification based on impact score)
+      # - 1: Minimum "Low" classification
+      # - 2: Minimum "Medium" classification
+      # Used to ensure important sources (e.g., FDA recalls) always get at least a certain classification
+      classification_floor: 0
+      
+      # Weighting bias (-2 to +2): Adjust impact score calculation
+      # - Negative: Reduce impact (e.g., noisy but useful sources)
+      # - 0: No bias (default)
+      # - Positive: Increase impact (e.g., highly relevant sources)
+      weighting_bias: 0
+
+    # Example: FDA Food Safety Recalls
+    - id: fda_food_safety_recalls
+      type: rss
+      enabled: true
+      tier: global
+      url: "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/food-safety-recalls/rss.xml"
+      tags: ["recall", "food-safety", "supply-disruption"]
+      geo:
+        country: "US"
+      trust_tier: 3
+      classification_floor: 1  # Food recalls are always at least "Low" classification
+      weighting_bias: 0
+
+  regional:
+    # Example: NWS Active Alerts for Indiana
+    - id: nws_active_in
+      type: nws_alerts
+      enabled: true
+      tier: regional
+      url: "https://api.weather.gov/alerts/active?area=IN"
+      tags: ["weather", "indiana"]
+      geo:
+        country: "US"
+        state: "IN"
+      trust_tier: 3
+      classification_floor: 0
+      weighting_bias: 0
+
+  local:
+    # Example: USCG Local Notices to Mariners (District 1)
+    - id: uscg_lnm_district_1
+      type: rss
+      enabled: true
+      tier: local
+      url: "https://public.govdelivery.com/topics/USDHSCG_65/feed.rss"
+      tags: ["port", "maritime", "uscg"]
+      geo:
+        country: "US"
+      trust_tier: 3
+      classification_floor: 0
+      weighting_bias: 0
+      
+      # Per-source suppression rules (optional)
+      # These rules apply only to this source, in addition to global suppression rules
+      suppress:
+        - id: uscg_routine_nav_notice
+          kind: keyword  # Match type: keyword, regex, exact
+          field: title  # Field to match: title, summary, raw_text, url, event_type, source_id, tier, any
+          pattern: "weekly summary"
+          case_sensitive: false
+          note: "Routine weekly digest; too chatty"

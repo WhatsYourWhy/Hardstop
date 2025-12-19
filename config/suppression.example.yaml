@@ -1,0 +1,36 @@
+version: 1
+
+# Global suppression rules apply to all sources
+# These rules help filter out common noise patterns across multiple feeds
+enabled: true
+
+rules:
+  # Example: Suppress test alerts
+  # These are common across many alerting systems and are not real events
+  - id: global_test_alerts
+    kind: keyword  # Match type: keyword (substring), regex (regex pattern), exact (exact match)
+    field: any  # Field to match: title, summary, raw_text, url, event_type, source_id, tier, any (all fields)
+    pattern: "test alert"
+    case_sensitive: false  # Case-insensitive matching
+    note: "Common noise across multiple feeds"
+    reason_code: "TEST_ALERT"  # Optional: Short code for reporting
+
+  # Example: Suppress training exercises
+  # Training exercises are not real alerts and can be noisy
+  - id: global_training_notice
+    kind: keyword
+    field: any
+    pattern: "training exercise"
+    case_sensitive: false
+    note: "Training exercises are not real alerts"
+    reason_code: "TRAINING"
+
+  # Example: Suppress specific URL patterns (using regex)
+  # Uncomment and customize as needed:
+  # - id: global_exclude_test_urls
+  #   kind: regex
+  #   field: url
+  #   pattern: ".*test.*|.*example\\.com.*"
+  #   case_sensitive: false
+  #   note: "Exclude test/example URLs"
+  #   reason_code: "TEST_URL"
