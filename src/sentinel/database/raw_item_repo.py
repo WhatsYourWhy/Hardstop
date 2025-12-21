@@ -1,7 +1,7 @@
 """Repository for raw_items table operations."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -225,3 +225,25 @@ def mark_raw_item_suppressed(
     session.add(raw_item)
     logger.debug(f"Marked raw item {raw_id} as suppressed (rule: {primary_rule_id})")
 
+
+def query_suppressed_items(
+    session: Session,
+    since_hours: int,
+) -> List[RawItem]:
+    """
+    Query suppressed items within time window.
+    
+    Args:
+        session: SQLAlchemy session
+        since_hours: How many hours back to look
+        
+    Returns:
+        List of RawItem rows with suppression_status == "SUPPRESSED"
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    cutoff_iso = cutoff.isoformat()
+    
+    return session.query(RawItem).filter(
+        RawItem.suppression_status == "SUPPRESSED",
+        RawItem.suppressed_at_utc >= cutoff_iso,
+    ).all()

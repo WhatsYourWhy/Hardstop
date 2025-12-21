@@ -1170,6 +1170,59 @@ def cmd_init(args: argparse.Namespace) -> None:
             print(f"  - {item}")
 
 
+def cmd_export(args: argparse.Namespace) -> None:
+    """Export structured data (v1.1)."""
+    config = load_config()
+    sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    
+    try:
+        with session_context(sqlite_path) as session:
+            from sentinel.api.export import export_alerts, export_brief, export_sources
+            
+            export_type = args.export_type
+            
+            if export_type == "brief":
+                result = export_brief(
+                    session,
+                    since=args.since,
+                    include_class0=args.include_class0,
+                    limit=args.limit,
+                    format=args.format,
+                    out=args.out,
+                )
+                if not args.out:
+                    print(result)
+            elif export_type == "alerts":
+                result = export_alerts(
+                    session,
+                    since=getattr(args, "since", None),
+                    classification=getattr(args, "classification", None),
+                    tier=getattr(args, "tier", None),
+                    source_id=getattr(args, "source_id", None),
+                    limit=args.limit,
+                    format=args.format,
+                    out=args.out,
+                )
+                if not args.out:
+                    print(result)
+            elif export_type == "sources":
+                result = export_sources(
+                    session,
+                    lookback=args.lookback,
+                    stale=args.stale,
+                    format=args.format,
+                    out=args.out,
+                )
+                if not args.out:
+                    print(result)
+            else:
+                logger.error(f"Unknown export type: {export_type}")
+                return
+    except Exception as e:
+        logger.error(f"Error exporting: {e}", exc_info=True)
+        raise
+
+
 def cmd_brief(args: argparse.Namespace) -> None:
     """Generate daily brief."""
     if not args.today:
@@ -1428,6 +1481,115 @@ def main() -> None:
     # doctor command
     doctor_parser = subparsers.add_parser("doctor", help="Run health checks on Sentinel system")
     doctor_parser.set_defaults(func=cmd_doctor)
+    
+    # export command (v1.1)
+    export_parser = subparsers.add_parser("export", help="Export structured data (v1.1)")
+    export_subparsers = export_parser.add_subparsers(dest="export_type", required=True, help="Export type")
+    
+    # export brief
+    export_brief_parser = export_subparsers.add_parser("brief", help="Export brief data")
+    export_brief_parser.add_argument(
+        "--since",
+        type=str,
+        default="24h",
+        help="Time window: 24h, 72h, or 7d (default: 24h)",
+    )
+    export_brief_parser.add_argument(
+        "--include-class0",
+        action="store_true",
+        help="Include classification 0 (Interesting) alerts",
+    )
+    export_brief_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of alerts per section (default: 20)",
+    )
+    export_brief_parser.add_argument(
+        "--format",
+        type=str,
+        choices=["json"],
+        default="json",
+        help="Export format (default: json)",
+    )
+    export_brief_parser.add_argument(
+        "--out",
+        type=Path,
+        help="Output file path (if not provided, prints to stdout)",
+    )
+    export_brief_parser.set_defaults(func=cmd_export)
+    
+    # export alerts
+    export_alerts_parser = export_subparsers.add_parser("alerts", help="Export alerts data")
+    export_alerts_parser.add_argument(
+        "--since",
+        type=str,
+        help="Time window: 24h, 72h, or 7d (if not provided, no time filter)",
+    )
+    export_alerts_parser.add_argument(
+        "--classification",
+        type=int,
+        choices=[0, 1, 2],
+        help="Filter by classification (0, 1, 2)",
+    )
+    export_alerts_parser.add_argument(
+        "--tier",
+        type=str,
+        choices=["global", "regional", "local"],
+        help="Filter by tier",
+    )
+    export_alerts_parser.add_argument(
+        "--source-id",
+        type=str,
+        help="Filter by source ID",
+    )
+    export_alerts_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of alerts (default: 50)",
+    )
+    export_alerts_parser.add_argument(
+        "--format",
+        type=str,
+        choices=["json", "csv"],
+        default="json",
+        help="Export format (default: json)",
+    )
+    export_alerts_parser.add_argument(
+        "--out",
+        type=Path,
+        help="Output file path (if not provided, prints to stdout)",
+    )
+    export_alerts_parser.set_defaults(func=cmd_export)
+    
+    # export sources
+    export_sources_parser = export_subparsers.add_parser("sources", help="Export sources health data")
+    export_sources_parser.add_argument(
+        "--lookback",
+        type=str,
+        default="7d",
+        help="Lookback window (default: 7d)",
+    )
+    export_sources_parser.add_argument(
+        "--stale",
+        type=str,
+        default="72h",
+        help="Stale threshold (default: 72h)",
+    )
+    export_sources_parser.add_argument(
+        "--format",
+        type=str,
+        choices=["json"],
+        default="json",
+        help="Export format (default: json)",
+    )
+    export_sources_parser.add_argument(
+        "--out",
+        type=Path,
+        help="Output file path (if not provided, prints to stdout)",
+    )
+    export_sources_parser.set_defaults(func=cmd_export)
     
     # init command (v1.0)
     init_parser = subparsers.add_parser("init", help="Initialize Sentinel configuration files from examples (v1.0)")

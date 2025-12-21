@@ -250,3 +250,16 @@ def query_recent_alerts(
     
     return q.limit(limit).all()
 
+
+def find_alert_by_id(session: Session, alert_id: str) -> Optional[Alert]:
+    """
+    Find alert by ID.
+    
+    Args:
+        session: SQLAlchemy session
+        alert_id: Alert ID
+        
+    Returns:
+        Alert row or None if not found
+    """
+    return session.query(Alert).filter(Alert.alert_id == alert_id).first()
