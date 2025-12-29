@@ -386,9 +386,13 @@ class TestEtaParsing:
         eta_49h = (now + timedelta(hours=49)).strftime("%Y-%m-%d %H:%M:%S")
         assert is_eta_within_48h(eta_49h, now) is False
         
-        # Past date (should return False)
+        # Past date within 7-day lookback (should return True)
         past_eta = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
-        assert is_eta_within_48h(past_eta, now) is False
+        assert is_eta_within_48h(past_eta, now) is True
+        
+        # Past date beyond lookback (should return False)
+        old_eta = (now - timedelta(days=8)).strftime("%Y-%m-%d %H:%M:%S")
+        assert is_eta_within_48h(old_eta, now) is False
     
     def test_is_eta_within_48h_bad_dates(self):
         """Test that bad dates return False without crashing."""

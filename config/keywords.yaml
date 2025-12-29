@@ -1,0 +1,14 @@
+version: 1
+risk_keywords:
+  - term: "STRIKE"
+    weight: 1
+  - term: "SPILL"
+    weight: 1
+  - term: "CLOSURE"
+    weight: 1
+  - term: "CLOSED"
+    weight: 1
+  - term: "SHUTDOWN"
+    weight: 1
+  - term: "RANSOMWARE"
+    weight: 2

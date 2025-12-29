@@ -1,11 +1,39 @@
 """Network impact scoring for alert classification."""
 
+from functools import lru_cache
 from datetime import datetime, timedelta, time, timezone
-from typing import Dict, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 
 from sqlalchemy.orm import Session
 
+from ..config.loader import load_keywords_config
 from ..database.schema import Facility, Lane, Shipment
+
+
+DEFAULT_RISK_KEYWORDS: List[Dict[str, int]] = [
+    {"term": "SPILL", "weight": 1},
+    {"term": "STRIKE", "weight": 1},
+    {"term": "CLOSURE", "weight": 1},
+    {"term": "CLOSED", "weight": 1},
+    {"term": "SHUTDOWN", "weight": 1},
+]
+
+
+@lru_cache(maxsize=1)
+def _load_risk_keywords() -> List[Dict[str, int]]:
+    """
+    Load risk keywords from config with fallback defaults.
+    """
+    try:
+        config = load_keywords_config()
+        keywords = config.get("risk_keywords", [])
+        if keywords:
+            return keywords
+    except FileNotFoundError:
+        pass
+    except ValueError:
+        pass
+    return DEFAULT_RISK_KEYWORDS
 
 
 def parse_eta_date_safely(eta_date_str: Optional[str]) -> Optional[datetime]:
@@ -73,7 +101,7 @@ def parse_eta_date_safely(eta_date_str: Optional[str]) -> Optional[datetime]:
 
 def is_eta_within_48h(eta_date_str: Optional[str], now: Optional[datetime] = None) -> bool:
     """
-    Check if an ETA date is within 48 hours from now.
+    Check if an ETA date is within the 48h forward window or 7d lookback.
     
     Args:
         eta_date_str: ETA date string to check
@@ -99,8 +127,8 @@ def is_eta_within_48h(eta_date_str: Optional[str], now: Optional[datetime] = Non
     # Calculate time difference
     time_diff = eta_dt - now
     
-    # Check if within 48 hours (and not in the past)
-    return timedelta(0) <= time_diff <= timedelta(hours=48)
+    # Consider late shipments up to 7 days back and 48h forward
+    return timedelta(days=-7) <= time_diff <= timedelta(hours=48)
 
 
 def calculate_network_impact_score(
@@ -193,17 +221,20 @@ def calculate_network_impact_score(
     
     # Check event type (check both event_type field and title/raw_text for keywords)
     event_type = event.get("event_type", "").upper()
-    text = f"{event.get('title', '')} {event.get('raw_text', '')}".upper()
+    text = f"{event.get('title', '')} {event.get('raw_text', '')}"
+    text_upper = text.upper()
     high_impact_types = {"SPILL", "STRIKE", "CLOSURE"}
-    high_impact_keywords = {"SPILL", "STRIKE", "CLOSURE", "CLOSED", "SHUTDOWN"}
     
     if event_type in high_impact_types:
         score += 1
         breakdown.append(f"+1: Event type in high-impact types ({event_type})")
-    elif any(keyword in text for keyword in high_impact_keywords):
-        score += 1
-        matched_keyword = next((k for k in high_impact_keywords if k in text), "unknown")
-        breakdown.append(f"+1: High-impact keyword detected ({matched_keyword})")
+    else:
+        keyword_matches = [entry for entry in _load_risk_keywords() if entry["term"] in text_upper]
+        if keyword_matches:
+            total_weight = sum(entry.get("weight", 1) for entry in keyword_matches)
+            score += total_weight
+            matched_terms = ", ".join(entry["term"] for entry in keyword_matches)
+            breakdown.append(f"+{total_weight}: High-impact keywords detected ({matched_terms})")
     
     if not breakdown:
         breakdown.append("No impact factors detected")

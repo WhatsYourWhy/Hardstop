@@ -4,27 +4,39 @@ import re
 from datetime import datetime
 from typing import Dict, Optional, Tuple
 
+import us
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from sentinel.database.schema import Facility, Lane, Shipment
 
 
-US_STATE_TO_ABBR = {
-    "indiana": "IN",
-    "illinois": "IL",
-    "ohio": "OH",
-    "michigan": "MI",
-    "kentucky": "KY",
-    # expand as needed
-}
-
-
-def _normalize_state(s: str) -> str:
-    s = s.strip()
-    if len(s) == 2:
-        return s.upper()
-    return US_STATE_TO_ABBR.get(s.lower(), s.upper())
+def _normalize_state(state_value: str | None) -> Optional[str]:
+    """
+    Normalize state input into a two-letter postal code.
+    
+    Returns:
+        Two-letter postal code if recognized, otherwise None.
+    """
+    if not state_value:
+        return None
+    
+    normalized_input = state_value.strip()
+    if not normalized_input:
+        return None
+    
+    match = us.states.lookup(normalized_input)
+    if match:
+        return match.abbr
+    
+    # Ensure strict two-letter code
+    if len(normalized_input) == 2 and normalized_input.isalpha():
+        normalized_input = normalized_input.upper()
+        match = us.states.lookup(normalized_input)
+        if match:
+            return match.abbr
+    
+    return None
 
 
 def _extract_city_state(text: str) -> Optional[Tuple[str, str]]:
@@ -36,6 +48,8 @@ def _extract_city_state(text: str) -> Optional[Tuple[str, str]]:
         return None
     city = m.group(1).strip().strip(".")
     state = _normalize_state(m.group(2).strip().strip("."))
+    if not state:
+        return None
     return city, state
 
 
@@ -54,6 +68,7 @@ def link_event_to_network(event: Dict, session: Session, max_shipments: int = 50
     event.setdefault("link_confidence", {})
     event.setdefault("link_provenance", {})
     event.setdefault("facility_candidates", [])
+    event.setdefault("lane_matches", [])
 
     facility_confidence = 0.0
     facility_provenance = None
@@ -92,13 +107,9 @@ def link_event_to_network(event: Dict, session: Session, max_shipments: int = 50
                 Facility.state == state,
                 Facility.state.ilike(state),
             ]
-            # If state is an abbreviation, also check for full name
-            if len(state) == 2:
-                # Find full state name from abbreviation (reverse lookup)
-                for full_name, abbr in US_STATE_TO_ABBR.items():
-                    if abbr == state:
-                        state_conditions.append(Facility.state.ilike(full_name))
-                        break
+            state_match = us.states.lookup(state)
+            if state_match:
+                state_conditions.append(Facility.state.ilike(state_match.name))
             
             hits = (
                 session.query(Facility)
@@ -168,6 +179,7 @@ def link_event_to_network(event: Dict, session: Session, max_shipments: int = 50
     # 2) If facilities found, link lanes
     if event["facilities"]:
         fac_ids = event["facilities"]
+        fac_id_set = set(fac_ids)
         lanes = (
             session.query(Lane)
             .filter(or_(Lane.origin_facility_id.in_(fac_ids), Lane.dest_facility_id.in_(fac_ids)))
@@ -176,6 +188,29 @@ def link_event_to_network(event: Dict, session: Session, max_shipments: int = 50
         lane_ids = [l.lane_id for l in lanes]
         if lane_ids:
             event["lanes"] = sorted(set(event["lanes"] + lane_ids))
+            
+            existing_lane_matches = [
+                match for match in event.get("lane_matches", []) if isinstance(match, dict) and match.get("lane_id")
+            ]
+            lane_match_map = {match["lane_id"]: match for match in existing_lane_matches}
+            
+            for lane in lanes:
+                match_sources = []
+                if lane.origin_facility_id in fac_id_set:
+                    match_sources.append("ORIGIN")
+                if lane.dest_facility_id in fac_id_set:
+                    match_sources.append("DESTINATION")
+                
+                if not match_sources:
+                    continue
+                
+                match_type = "BOTH" if len(match_sources) == 2 else match_sources[0]
+                lane_match_map[lane.lane_id] = {
+                    "lane_id": lane.lane_id,
+                    "match_type": match_type,
+                }
+            
+            event["lane_matches"] = list(lane_match_map.values())
             # Lane confidence is 0.70 (inherited from facility relationship)
             event["link_confidence"]["lanes"] = 0.70
             event["link_provenance"]["lanes"] = "FACILITY_RELATION"

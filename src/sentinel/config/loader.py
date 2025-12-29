@@ -6,6 +6,7 @@ import yaml
 DEFAULT_CONFIG_PATH = Path("sentinel.config.yaml")
 DEFAULT_SOURCES_PATH = Path("config/sources.yaml")
 DEFAULT_SUPPRESSION_PATH = Path("config/suppression.yaml")
+DEFAULT_KEYWORDS_PATH = Path("config/keywords.yaml")
 
 
 def load_config(path: Path | None = None) -> Dict[str, Any]:
@@ -182,4 +183,57 @@ def get_suppression_rules_for_source(source: Dict[str, Any]) -> List[Dict[str, A
         List of suppression rule dictionaries (empty list if none)
     """
     return source.get("suppress", [])
+
+
+def load_keywords_config(path: Path | None = None) -> Dict[str, Any]:
+    """
+    Load risk keyword configuration from YAML.
+    
+    Returns:
+        Dict containing validated keyword definitions.
+    """
+    cfg_path = path or DEFAULT_KEYWORDS_PATH
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"Keywords config file not found: {cfg_path}")
+    
+    with cfg_path.open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f) or {}
+    
+    if not isinstance(config, dict):
+        raise ValueError("Keywords config must be a dictionary")
+    
+    keywords = config.get("risk_keywords", [])
+    if not isinstance(keywords, list):
+        raise ValueError("Keywords config 'risk_keywords' must be a list")
+    
+    normalized_keywords: List[Dict[str, Any]] = []
+    for entry in keywords:
+        if isinstance(entry, str):
+            term = entry
+            weight = 1
+        elif isinstance(entry, dict):
+            term = entry.get("term")
+            weight = entry.get("weight", 1)
+        else:
+            raise ValueError("Each keyword entry must be a string or dictionary")
+        
+        if not term or not isinstance(term, str):
+            raise ValueError("Keyword entry missing 'term'")
+        
+        if not isinstance(weight, (int, float)):
+            raise ValueError("Keyword 'weight' must be numeric")
+        
+        weight_value = int(float(weight))
+        if weight_value < 0:
+            weight_value = 0
+        
+        normalized_keywords.append(
+            {
+                "term": term.strip().upper(),
+                "weight": weight_value,
+            }
+        )
+    
+    config["risk_keywords"] = normalized_keywords
+    return config
 

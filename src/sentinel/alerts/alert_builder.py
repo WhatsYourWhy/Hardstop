@@ -1,5 +1,5 @@
 import json
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,44 @@ from ..database.alert_repo import (
     update_existing_alert_row,
     upsert_new_alert_row,
 )
+
+
+def _dedupe_preserve_order(items: List[str]) -> List[str]:
+    seen = set()
+    result = []
+    for item in items:
+        if item in seen or item is None:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
+
+
+def _merge_scope(existing_scope_json: str | None, new_scope: Dict[str, object]) -> Dict[str, object]:
+    if not existing_scope_json:
+        return new_scope
+    
+    try:
+        existing_scope = json.loads(existing_scope_json) or {}
+    except (json.JSONDecodeError, TypeError):
+        existing_scope = {}
+    
+    merged_scope = {}
+    for key in ("facilities", "lanes", "shipments"):
+        previous = existing_scope.get(key, [])
+        current = new_scope.get(key, [])
+        previous_list = previous if isinstance(previous, list) else []
+        current_list = current if isinstance(current, list) else []
+        merged_scope[key] = _dedupe_preserve_order(previous_list + current_list)
+    
+    merged_scope["shipments_total_linked"] = max(
+        int(existing_scope.get("shipments_total_linked", len(merged_scope["shipments"])) or 0),
+        int(new_scope.get("shipments_total_linked", len(new_scope.get("shipments", []))) or 0),
+    )
+    merged_scope["shipments_truncated"] = bool(
+        existing_scope.get("shipments_truncated") or new_scope.get("shipments_truncated")
+    )
+    return merged_scope
 
 
 def build_basic_alert(event: Dict, session: Optional[Session] = None) -> SentinelAlert:
@@ -101,13 +139,14 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
     )
     
     # Prepare scope JSON for database storage
-    scope_json = json.dumps({
+    scope_payload: Dict[str, object] = {
         "facilities": scope.facilities,
         "lanes": scope.lanes,
         "shipments": scope.shipments,
         "shipments_total_linked": event.get("shipments_total_linked", len(scope.shipments)),
         "shipments_truncated": event.get("shipments_truncated", False),
-    })
+    }
+    scope_json = json.dumps(scope_payload)
 
     impact_assessment = AlertImpactAssessment(
         qualitative_impact=[event.get("raw_text", "")[:280]],
@@ -139,6 +178,13 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Sentine
         
         if existing:
             # Update existing alert (v0.7: store tier/source_id/trust_tier from latest event)
+            merged_scope_payload = _merge_scope(existing.scope_json, scope_payload)
+            scope.facilities = merged_scope_payload.get("facilities", scope.facilities)
+            scope.lanes = merged_scope_payload.get("lanes", scope.lanes)
+            scope.shipments = merged_scope_payload.get("shipments", scope.shipments)
+            scope_payload = merged_scope_payload
+            scope_json = json.dumps(scope_payload)
+            
             update_existing_alert_row(
                 session,
                 existing,
