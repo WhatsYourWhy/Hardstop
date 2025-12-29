@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import json
 import shutil
 import sys
 import uuid
@@ -730,6 +731,29 @@ def cmd_run(args: argparse.Namespace) -> None:
             # Convert to FetchResult format
             fetch_results = []
             for run in fetch_runs:
+                diagnostics = {}
+                if run.diagnostics_json:
+                    try:
+                        diagnostics = json.loads(run.diagnostics_json)
+                    except (json.JSONDecodeError, TypeError):
+                        diagnostics = {}
+                items_count = None
+                for key in ("items_seen", "items_new"):
+                    value = diagnostics.get(key)
+                    if value is not None:
+                        try:
+                            items_count = int(value)
+                            break
+                        except (TypeError, ValueError):
+                            continue
+                if items_count is None:
+                    for value in (run.items_fetched, run.items_new):
+                        if value:
+                            try:
+                                items_count = int(value)
+                                break
+                            except (TypeError, ValueError):
+                                continue
                 fetch_results.append(
                     FetchResult(
                         source_id=run.source_id,
@@ -739,6 +763,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                         error=run.error,
                         duration_seconds=run.duration_seconds,
                         items=[],  # We don't store items in FetchResult for status evaluation
+                        items_count=items_count,
                     )
                 )
             

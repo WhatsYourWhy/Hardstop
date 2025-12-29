@@ -26,6 +26,7 @@ class FetchResult(BaseModel):
     error: Optional[str] = None
     duration_seconds: Optional[float] = None
     items: List[RawItemCandidate] = Field(default_factory=list)
+    items_count: Optional[int] = None
     bytes_downloaded: int = 0
 
 

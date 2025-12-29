@@ -42,6 +42,22 @@ def evaluate_run_status(
     ingest_runs_provided = ingest_runs
     ingest_runs = ingest_runs or []
     ingest_data_available = ingest_runs_provided is not None
+
+    def _get_fetch_item_count(result: FetchResult) -> int:
+        """
+        Use explicit item count if provided (e.g., reconstructed from diagnostics),
+        otherwise fall back to the in-memory items list length.
+        """
+        count = getattr(result, "items_count", None)
+        if count is None:
+            try:
+                return len(result.items)
+            except Exception:
+                return 0
+        try:
+            return int(count) if count is not None else 0
+        except (TypeError, ValueError):
+            return 0
     
     # Check for BROKEN conditions (exit code 2)
     
@@ -71,7 +87,7 @@ def evaluate_run_status(
     if fetch_results:
         successful_fetches = [r for r in fetch_results if r.status == "SUCCESS"]
         failed_fetches = [r for r in fetch_results if r.status == "FAILURE"]
-        quiet_successes = [r for r in successful_fetches if len(r.items) == 0]
+        quiet_successes = [r for r in successful_fetches if _get_fetch_item_count(r) == 0]
         
         if len(successful_fetches) == 0 and len(failed_fetches) > 0:
             # All failed, no quiet successes
@@ -81,7 +97,9 @@ def evaluate_run_status(
     # 5. Ingest crashed before processing any source
     # Check if we have items to ingest but no ingest runs
     if fetch_results and ingest_data_available and not ingest_runs:
-        successful_fetches_with_items = [r for r in fetch_results if r.status == "SUCCESS" and len(r.items) > 0]
+        successful_fetches_with_items = [
+            r for r in fetch_results if r.status == "SUCCESS" and _get_fetch_item_count(r) > 0
+        ]
         if successful_fetches_with_items:
             # We have items to ingest but no ingest runs - likely a crash
             messages.append("Ingest crashed before processing any source")
@@ -152,7 +170,7 @@ def evaluate_run_status(
         # Verify we have at least one success
         if fetch_results:
             successful_fetches = [r for r in fetch_results if r.status == "SUCCESS"]
-            quiet_successes = [r for r in successful_fetches if len(r.items) == 0]
+            quiet_successes = [r for r in successful_fetches if _get_fetch_item_count(r) == 0]
             if successful_fetches:
                 messages.append("All systems healthy")
             else:

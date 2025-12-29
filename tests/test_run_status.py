@@ -117,6 +117,51 @@ def test_broken_ingest_crashed():
     assert any("ingest crashed" in msg.lower() for msg in messages)
 
 
+def test_broken_ingest_crashed_with_items_count():
+    """Fetch results reconstructed with item counts should still detect ingest crash."""
+    fetch_results = [
+        FetchResult(
+            source_id="source1",
+            fetched_at_utc=datetime.now(timezone.utc).isoformat(),
+            status="SUCCESS",
+            status_code=200,
+            items=[],  # reconstructed list is empty
+            items_count=3,
+        ),
+    ]
+    exit_code, messages = evaluate_run_status(
+        fetch_results=fetch_results,
+        ingest_runs=[],
+        doctor_findings={"enabled_sources_count": 1},
+        stale_sources=None,
+    )
+    assert exit_code == 2
+    assert any("ingest crashed" in msg.lower() for msg in messages)
+
+
+def test_broken_ingest_crashed_with_items_count_strict():
+    """Strict mode should also treat fetch-with-items and missing ingest as broken."""
+    fetch_results = [
+        FetchResult(
+            source_id="source1",
+            fetched_at_utc=datetime.now(timezone.utc).isoformat(),
+            status="SUCCESS",
+            status_code=200,
+            items=[],
+            items_count=5,
+        ),
+    ]
+    exit_code, messages = evaluate_run_status(
+        fetch_results=fetch_results,
+        ingest_runs=[],
+        doctor_findings={"enabled_sources_count": 1},
+        stale_sources=None,
+        strict=True,
+    )
+    assert exit_code == 2
+    assert any("ingest crashed" in msg.lower() for msg in messages)
+
+
 def test_warning_some_sources_failed():
     """Test that some sources failing results in exit code 1."""
     fetch_results = [
