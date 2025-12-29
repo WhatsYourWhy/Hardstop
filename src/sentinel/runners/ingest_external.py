@@ -5,7 +5,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -155,6 +155,7 @@ def main(
         source_events = 0
         source_alerts = 0
         source_errors = 0
+        suppression_reason_counts: Dict[str, int] = defaultdict(int)
         
         # Start timer for this source batch (v1.0)
         source_start_time = time.monotonic()
@@ -169,6 +170,7 @@ def main(
             duration_seconds: float,
             *,
             skip_commit: bool = False,
+            diagnostics: Optional[Dict[str, Any]] = None,
         ) -> None:
             """Persist a single INGEST SourceRun row for the current source."""
             nonlocal source_run_written
@@ -190,6 +192,7 @@ def main(
                 items_suppressed=source_suppressed,
                 items_events_created=source_events,
                 items_alerts_touched=source_alerts,
+                diagnostics=diagnostics,
             )
             if skip_commit:
                 session.rollback()
@@ -229,7 +232,7 @@ def main(
                     
                     # Get source config for metadata (with v0.7 defaults applied)
                     source_config_raw = all_sources.get(raw_item.source_id, {})
-                    source_config = get_source_with_defaults(source_config_raw) if source_config_raw else {}
+                    source_config = get_source_with_defaults(source_config_raw, sources_config) if source_config_raw else {}
                     
                     # Normalize to event (injects tier/trust_tier/classification_floor/weighting_bias)
                     event = normalize_external_event(
@@ -273,6 +276,7 @@ def main(
                                 suppression_result.matched_rule_ids,
                                 suppressed_at_utc,
                                 "INGEST_EXTERNAL",
+                                suppression_result.primary_reason_code,
                             )
                             
                             # Save event with suppression metadata (but don't create alert)
@@ -282,6 +286,7 @@ def main(
                                 suppression_primary_rule_id=suppression_result.primary_rule_id,
                                 suppression_rule_ids=suppression_result.matched_rule_ids,
                                 suppressed_at_utc=suppressed_at_utc,
+                                suppression_reason_code=suppression_result.primary_reason_code,
                             )
                             session.commit()
                             
@@ -293,9 +298,12 @@ def main(
                             if explain_suppress:
                                 logger.info(
                                     f"Suppressed raw_item {raw_item.raw_id} (rule: {suppression_result.primary_rule_id}, "
-                                    f"matched: {suppression_result.matched_rule_ids})"
+                                f"reason: {suppression_result.primary_reason_code or suppression_result.primary_rule_id})"
                                 )
                             
+                            reason_code = suppression_result.primary_reason_code or suppression_result.primary_rule_id or "unknown"
+                            suppression_reason_counts[reason_code] += 1
+
                             source_processed += 1
                             stats["processed"] += 1
                             continue  # Skip alert creation
@@ -361,7 +369,11 @@ def main(
             source_duration = time.monotonic() - source_start_time
             
             # Create SourceRun BEFORE potentially re-raising (guaranteed creation, v1.0)
-            _persist_source_run("FAILURE", source_error_msg, source_duration, skip_commit=fatal_failure)
+            diagnostics_payload = {
+                "errors": source_errors,
+                "suppression_reason_counts": dict(suppression_reason_counts),
+            }
+            _persist_source_run("FAILURE", source_error_msg, source_duration, skip_commit=fatal_failure, diagnostics=diagnostics_payload)
             
             # NOW re-raise if fail_fast (after SourceRun is safely created)
             if fail_fast or fatal_failure:
@@ -378,7 +390,11 @@ def main(
             else:
                 final_error_msg = None
             
-            _persist_source_run(ingest_status, final_error_msg, source_duration)
+            diagnostics_payload = {
+                "errors": source_errors,
+                "suppression_reason_counts": dict(suppression_reason_counts),
+            }
+            _persist_source_run(ingest_status, final_error_msg, source_duration, diagnostics=diagnostics_payload)
         
         # Log source summary (runs for both success and failure cases)
         logger.info(

@@ -33,6 +33,8 @@ def test_keyword_match_any_field():
     assert result.is_suppressed is True
     assert result.primary_rule_id == "test_keyword"
     assert "test_keyword" in result.matched_rule_ids
+    assert result.primary_reason_code == "test_keyword"
+    assert result.reason_codes == ["test_keyword"]
 
 
 def test_keyword_match_specific_field():
@@ -87,6 +89,7 @@ def test_keyword_no_match():
     
     assert result.is_suppressed is False
     assert result.primary_rule_id is None
+    assert result.primary_reason_code is None
 
 
 def test_regex_match():
@@ -139,6 +142,7 @@ def test_exact_match():
     
     assert result.is_suppressed is True
     assert result.primary_rule_id == "test_exact"
+    assert result.primary_reason_code == "test_exact"
 
 
 def test_case_sensitive_match():
@@ -208,6 +212,30 @@ def test_global_precedence_over_source():
     # Both rules should be in matched list
     assert "global_rule" in result.matched_rule_ids
     assert "source_rule" in result.matched_rule_ids
+
+
+def test_reason_code_override():
+    """Reason codes fall back to explicit overrides."""
+    rule = SuppressionRule(
+        id="rule_with_reason",
+        kind="keyword",
+        field="title",
+        pattern="snooze",
+        reason_code="noise",
+        case_sensitive=False,
+    )
+    item = {"title": "Snooze button"}
+    result = evaluate_suppression(
+        source_id="test_source",
+        tier="global",
+        item=item,
+        global_rules=[rule],
+        source_rules=[],
+    )
+    assert result.is_suppressed is True
+    assert result.primary_rule_id == "rule_with_reason"
+    assert result.primary_reason_code == "noise"
+    assert result.reason_codes == ["noise"]
 
 
 def test_multiple_matches_collected():

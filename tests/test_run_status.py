@@ -285,3 +285,33 @@ def test_strict_mode_warnings_become_broken():
     )
     assert exit_code == 2  # Warnings become broken in strict mode
     assert any("failed" in msg.lower() for msg in messages)
+
+
+def test_failure_budget_blocker_breaks_run():
+    """Health budget blockers should immediately break the run."""
+    exit_code, messages = evaluate_run_status(
+        fetch_results=None,
+        ingest_runs=None,
+        doctor_findings={
+            "enabled_sources_count": 1,
+            "health_budget_blockers": ["source1"],
+        },
+        stale_sources=None,
+    )
+    assert exit_code == 2
+    assert any("failure budget" in msg.lower() for msg in messages)
+
+
+def test_failure_budget_warning_sets_warning():
+    """Health budget warnings surface as warnings."""
+    exit_code, messages = evaluate_run_status(
+        fetch_results=None,
+        ingest_runs=None,
+        doctor_findings={
+            "enabled_sources_count": 1,
+            "health_budget_warnings": ["source1"],
+        },
+        stale_sources=None,
+    )
+    assert exit_code == 1
+    assert any("failure budget" in msg.lower() or "budget" in msg.lower() for msg in messages)

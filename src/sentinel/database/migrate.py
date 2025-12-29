@@ -202,6 +202,7 @@ def ensure_suppression_columns(sqlite_path: str) -> None:
             ("suppression_rule_ids_json", "TEXT"),
             ("suppressed_at_utc", "TEXT"),
             ("suppression_stage", "TEXT"),
+            ("suppression_reason_code", "TEXT"),
         ]
         for col, coltype in raw_items_additions:
             if not _column_exists(conn, "raw_items", col):
@@ -212,6 +213,7 @@ def ensure_suppression_columns(sqlite_path: str) -> None:
             ("suppression_primary_rule_id", "TEXT"),
             ("suppression_rule_ids_json", "TEXT"),
             ("suppressed_at_utc", "TEXT"),
+            ("suppression_reason_code", "TEXT"),
         ]
         for col, coltype in events_additions:
             if not _column_exists(conn, "events", col):
@@ -233,7 +235,8 @@ def ensure_source_runs_table(sqlite_path: str) -> None:
     """
     conn = sqlite3.connect(sqlite_path)
     try:
-        if not _table_exists(conn, "source_runs"):
+        table_missing = not _table_exists(conn, "source_runs")
+        if table_missing:
             conn.execute("""
                 CREATE TABLE source_runs (
                     run_id TEXT PRIMARY KEY,
@@ -250,7 +253,8 @@ def ensure_source_runs_table(sqlite_path: str) -> None:
                     items_processed INTEGER NOT NULL DEFAULT 0,
                     items_suppressed INTEGER NOT NULL DEFAULT 0,
                     items_events_created INTEGER NOT NULL DEFAULT 0,
-                    items_alerts_touched INTEGER NOT NULL DEFAULT 0
+                    items_alerts_touched INTEGER NOT NULL DEFAULT 0,
+                    diagnostics_json TEXT
                 );
             """)
             # Create indexes
@@ -260,6 +264,11 @@ def ensure_source_runs_table(sqlite_path: str) -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_source_runs_run_at_utc ON source_runs(run_at_utc);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_source_runs_source_run_at ON source_runs(source_id, run_at_utc);")
             conn.commit()
+        else:
+            # Add diagnostics column if this is an upgraded install
+            if not _column_exists(conn, "source_runs", "diagnostics_json"):
+                conn.execute("ALTER TABLE source_runs ADD COLUMN diagnostics_json TEXT;")
+                conn.commit()
     finally:
         conn.close()
 

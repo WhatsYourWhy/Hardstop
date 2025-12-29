@@ -77,6 +77,7 @@ class RawItem(Base):
     suppression_rule_ids_json = Column(Text, nullable=True)  # JSON array of matched rule IDs
     suppressed_at_utc = Column(String, nullable=True)  # ISO 8601 string
     suppression_stage = Column(String, nullable=True)  # e.g., INGEST_EXTERNAL
+    suppression_reason_code = Column(String, nullable=True)  # v1.1: stable reason code for analytics
 
 
 class Event(Base):
@@ -104,6 +105,7 @@ class Event(Base):
     suppression_primary_rule_id = Column(String, nullable=True)
     suppression_rule_ids_json = Column(Text, nullable=True)  # JSON array of matched rule IDs
     suppressed_at_utc = Column(String, nullable=True)  # ISO 8601 string
+    suppression_reason_code = Column(String, nullable=True)  # v1.1: reason code for observability
 
 
 class Alert(Base):
@@ -160,6 +162,7 @@ class SourceRun(Base):
     items_suppressed = Column(Integer, nullable=False, default=0)
     items_events_created = Column(Integer, nullable=False, default=0)
     items_alerts_touched = Column(Integer, nullable=False, default=0)  # created + updated
+    diagnostics_json = Column(Text, nullable=True)  # v1.1: structured diagnostics envelope
     
     __table_args__ = (
         Index('idx_source_runs_source_run_at', 'source_id', 'run_at_utc'),

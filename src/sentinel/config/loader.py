@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -7,6 +8,70 @@ DEFAULT_CONFIG_PATH = Path("sentinel.config.yaml")
 DEFAULT_SOURCES_PATH = Path("config/sources.yaml")
 DEFAULT_SUPPRESSION_PATH = Path("config/suppression.yaml")
 DEFAULT_KEYWORDS_PATH = Path("config/keywords.yaml")
+
+ALLOWED_TIERS = ("global", "regional", "local")
+
+BASE_TIER_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "global": {
+        "trust_tier": 3,
+        "classification_floor": 0,
+        "weighting_bias": 0,
+    },
+    "regional": {
+        "trust_tier": 2,
+        "classification_floor": 0,
+        "weighting_bias": 0,
+    },
+    "local": {
+        "trust_tier": 1,
+        "classification_floor": 0,
+        "weighting_bias": 0,
+    },
+}
+
+
+def _merge_tier_defaults(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Resolve tier defaults with built-in fallbacks."""
+    user_defaults = config.get("tier_defaults") or {}
+    merged: Dict[str, Dict[str, Any]] = {}
+    for tier in ALLOWED_TIERS:
+        merged[tier] = {
+            **BASE_TIER_DEFAULTS.get(tier, {}),
+            **(user_defaults.get(tier) or {}),
+        }
+    # Provide wildcard defaults for unknown tiers to avoid KeyErrors downstream
+    merged["*"] = BASE_TIER_DEFAULTS.get("global", {}).copy()
+    return merged
+
+
+def _normalize_source_entry(
+    source: Dict[str, Any],
+    tier_name: str,
+    tier_defaults: Dict[str, Dict[str, Any]],
+    global_defaults: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Normalize a single source entry so every CLI path consumes the same schema.
+    """
+    normalized = deepcopy(source)
+    tier = tier_name or normalized.get("tier") or "global"
+    normalized["tier"] = tier
+    normalized.setdefault("enabled", global_defaults.get("enabled", True))
+    normalized.setdefault("max_items_per_fetch", global_defaults.get("max_items_per_fetch"))
+    normalized.setdefault("timeout_seconds", global_defaults.get("timeout_seconds"))
+    normalized.setdefault("user_agent", global_defaults.get("user_agent"))
+
+    defaults_for_tier = tier_defaults.get(tier) or tier_defaults.get("*", {})
+    normalized.setdefault("trust_tier", defaults_for_tier.get("trust_tier", 2))
+    normalized.setdefault("classification_floor", defaults_for_tier.get("classification_floor", 0))
+    normalized.setdefault("weighting_bias", defaults_for_tier.get("weighting_bias", 0))
+
+    # Ensure tags/geo/suppress fields always have predictable container types
+    normalized["tags"] = list(normalized.get("tags", [])) if normalized.get("tags") else []
+    normalized["suppress"] = list(normalized.get("suppress", [])) if normalized.get("suppress") else []
+    normalized["geo"] = normalized.get("geo", {}) or {}
+
+    return normalized
 
 
 def load_config(path: Path | None = None) -> Dict[str, Any]:
@@ -44,9 +109,13 @@ def load_sources_config(path: Path | None = None) -> Dict[str, Any]:
     if "tiers" not in config:
         raise ValueError("Sources config must have 'tiers' field")
     
+    tier_defaults = config.get("tier_defaults")
+    if tier_defaults is not None and not isinstance(tier_defaults, dict):
+        raise ValueError("Sources config 'tier_defaults' must be a dictionary if provided")
+    
     # Validate tiers structure
     tiers = config.get("tiers", {})
-    for tier_name in ["global", "regional", "local"]:
+    for tier_name in ALLOWED_TIERS:
         if tier_name not in tiers:
             continue  # Optional tier
         if not isinstance(tiers[tier_name], list):
@@ -75,14 +144,15 @@ def get_all_sources(config: Dict[str, Any] | None = None) -> List[Dict[str, Any]
     if config is None:
         config = load_sources_config()
     
+    tier_defaults = _merge_tier_defaults(config)
+    defaults = config.get("defaults", {})
+    
     sources = []
     tiers = config.get("tiers", {})
-    for tier_name in ["global", "regional", "local"]:
+    for tier_name in ALLOWED_TIERS:
         tier_sources = tiers.get(tier_name, [])
         for source in tier_sources:
-            # Ensure tier field is set
-            source["tier"] = tier_name
-            sources.append(source)
+            sources.append(_normalize_source_entry(source, tier_name, tier_defaults, defaults))
     
     return sources
 
@@ -101,10 +171,11 @@ def get_sources_by_tier(tier: str, config: Dict[str, Any] | None = None) -> List
     if config is None:
         config = load_sources_config()
     
-    return config.get("tiers", {}).get(tier, [])
+    normalized = get_all_sources(config)
+    return [source for source in normalized if source.get("tier") == tier]
 
 
-def get_source_with_defaults(source: Dict[str, Any]) -> Dict[str, Any]:
+def get_source_with_defaults(source: Dict[str, Any], config: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """
     Get source config with v0.7 trust weighting defaults applied.
     
@@ -119,17 +190,14 @@ def get_source_with_defaults(source: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Source dictionary with defaults applied
     """
-    result = source.copy()
+    if config is None:
+        config = load_sources_config()
     
-    # Apply defaults for v0.7 fields
-    if "trust_tier" not in result:
-        result["trust_tier"] = 2
-    if "classification_floor" not in result:
-        result["classification_floor"] = 0
-    if "weighting_bias" not in result:
-        result["weighting_bias"] = 0
+    tier_defaults = _merge_tier_defaults(config)
+    defaults = config.get("defaults", {})
+    tier_name = source.get("tier", "global")
     
-    return result
+    return _normalize_source_entry(source, tier_name, tier_defaults, defaults)
 
 
 def load_suppression_config(path: Path | None = None) -> Dict[str, Any]:

@@ -17,6 +17,7 @@ def save_event(
     suppression_primary_rule_id: Optional[str] = None,
     suppression_rule_ids: Optional[List[str]] = None,
     suppressed_at_utc: Optional[str] = None,
+    suppression_reason_code: Optional[str] = None,
 ) -> Event:
     """
     Save normalized event to database.
@@ -27,6 +28,7 @@ def save_event(
         suppression_primary_rule_id: Optional primary suppression rule ID (v0.8)
         suppression_rule_ids: Optional list of matched suppression rule IDs (v0.8)
         suppressed_at_utc: Optional ISO 8601 timestamp when suppressed (v0.8)
+        suppression_reason_code: Optional stable reason code for analytics (v1.1)
         
     Returns:
         Event row
@@ -68,6 +70,7 @@ def save_event(
         suppression_primary_rule_id=suppression_primary_rule_id,  # v0.8: suppression metadata
         suppression_rule_ids_json=suppression_rule_ids_json,
         suppressed_at_utc=suppressed_at_utc,
+        suppression_reason_code=suppression_reason_code,
     )
     
     session.add(event_row)

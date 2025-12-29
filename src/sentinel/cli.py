@@ -7,7 +7,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, List, Optional
 
 import requests
 
@@ -27,9 +27,9 @@ from sentinel.database.migrate import (
     ensure_suppression_columns,
     ensure_trust_tier_columns,
 )
-from sentinel.database.raw_item_repo import save_raw_item
+from sentinel.database.raw_item_repo import save_raw_item, summarize_suppression_reasons
 from sentinel.database.schema import Alert, Event, RawItem, SourceRun
-from sentinel.database.source_run_repo import create_source_run, list_recent_runs
+from sentinel.database.source_run_repo import create_source_run, get_all_source_health, list_recent_runs
 from sentinel.database.sqlite_client import session_context
 from sentinel.output.daily_brief import generate_brief, render_json, render_markdown
 from sentinel.ops.run_record import (
@@ -133,7 +133,7 @@ def cmd_sources_test(args: argparse.Namespace) -> None:
         sources_config = load_sources_config()
         all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
         source_config_raw = all_sources.get(args.source_id, {})
-        source_config = get_source_with_defaults(source_config_raw) if source_config_raw else {}
+        source_config = get_source_with_defaults(source_config_raw, sources_config) if source_config_raw else {}
         tier = source_config.get("tier", "unknown")
         trust_tier = source_config.get("trust_tier", 2)
         
@@ -155,6 +155,12 @@ def cmd_sources_test(args: argparse.Namespace) -> None:
                     logger.error(f"Failed to save raw item: {e}")
             
             # Create FETCH SourceRun record
+            diagnostics_payload = {
+                "bytes_downloaded": result.bytes_downloaded or 0,
+                "dedupe_dropped": max(len(result.items) - items_new, 0),
+                "items_seen": len(result.items),
+            }
+
             create_source_run(
                 session,
                 run_group_id=run_group_id,
@@ -167,6 +173,7 @@ def cmd_sources_test(args: argparse.Namespace) -> None:
                 duration_seconds=result.duration_seconds,
                 items_fetched=len(result.items),
                 items_new=items_new,
+                diagnostics=diagnostics_payload,
             )
             session.commit()
         
@@ -219,61 +226,104 @@ def cmd_sources_health(args: argparse.Namespace) -> None:
     
     # Get source configs for tier info
     sources_config = load_sources_config()
-    all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
+    all_sources_list = get_all_sources(sources_config)
+    all_sources = {s["id"]: s for s in all_sources_list}
+    source_ids = list(all_sources.keys())
     
     with session_context(sqlite_path) as session:
         from sentinel.database.source_run_repo import get_all_source_health
         
-        health_list = get_all_source_health(session, lookback_n=lookback_n)
+        health_list = get_all_source_health(
+            session,
+            lookback_n=lookback_n,
+            stale_threshold_hours=stale_hours,
+            source_ids=source_ids,
+        )
         
         if not health_list:
             print("No source health data available. Run 'sentinel fetch' first.")
             return
         
-        # Calculate stale threshold
-        stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=stale_hours)
-        stale_cutoff_iso = stale_cutoff.isoformat()
-        
-        # Format table
         print(f"\nSource Health (last {lookback_n} runs, stale threshold: {stale_hours}h)")
-        print("=" * 120)
-        print(f"{'ID':<25} {'Tier':<8} {'Last Success':<20} {'SR':<6} {'Code':<6} {'New':<6} {'Stale':<8} {'Last Ingest (sup/proc)':<25}")
-        print("-" * 120)
+        print("=" * 140)
+        print(f"{'ID':<25} {'Tier':<6} {'Score':>5} {'SR%':>6} {'Last Success':<19} {'Stale':>7} {'Fail':>4} {'Code':>6} {'Supp%':>7} {'State':>8}")
+        print("-" * 140)
         
-        # Sort by tier, then by last_success_utc (stale first)
-        def sort_key(h):
-            tier_order = {"global": 0, "regional": 1, "local": 2}
-            tier = all_sources.get(h["source_id"], {}).get("tier", "unknown")
-            tier_val = tier_order.get(tier, 99)
-            last_success = h.get("last_success_utc") or "0000-00-00T00:00:00"
-            is_stale = last_success < stale_cutoff_iso if last_success else True
-            return (not is_stale, tier_val, last_success)
+        tier_order = {"global": 0, "regional": 1, "local": 2}
+        state_order = {"BLOCKED": 0, "WATCH": 1, "HEALTHY": 2}
+        
+        def sort_key(health: Dict[str, Any]) -> Any:
+            state = health.get("health_budget_state", "WATCH")
+            tier = all_sources.get(health["source_id"], {}).get("tier", "unknown")
+            return (
+                state_order.get(state, 1),
+                tier_order.get(tier, 99),
+                -(health.get("health_score") or 0),
+            )
         
         health_list.sort(key=sort_key)
         
         for health in health_list:
             source_id = health["source_id"]
-            tier = all_sources.get(source_id, {}).get("tier", "unknown")[:1].upper()  # G/R/L
-            last_success = health.get("last_success_utc") or "Never"
-            if last_success != "Never":
-                # Format timestamp for display
+            tier = all_sources.get(source_id, {}).get("tier", "unknown")[:1].upper()
+            last_success = health.get("last_success_utc")
+            last_success_display = "Never"
+            if last_success:
                 try:
                     dt = datetime.fromisoformat(last_success.replace("Z", "+00:00"))
-                    last_success = dt.strftime("%Y-%m-%d %H:%M")
-                except:
-                    pass
-            success_rate = health.get("success_rate", 0.0)
+                    last_success_display = dt.strftime("%Y-%m-%d %H:%M")
+                except ValueError:
+                    last_success_display = last_success
+            success_rate = health.get("success_rate", 0.0) * 100
+            stale_hours_value = health.get("stale_hours")
+            stale_display = f"{stale_hours_value:.0f}h" if stale_hours_value is not None else "—"
             status_code = health.get("last_status_code") or "-"
-            last_new = health.get("last_items_new", 0)
-            is_stale = last_success != "Never" and health.get("last_success_utc", "") < stale_cutoff_iso if health.get("last_success_utc") else True
-            stale = "YES" if is_stale else "NO"
+            suppression_ratio = health.get("suppression_ratio")
+            suppression_pct = f"{suppression_ratio * 100:.0f}%" if suppression_ratio is not None else "—"
+            state = health.get("health_budget_state", "WATCH")
+            score = health.get("health_score", 0)
+            consecutive_failures = health.get("consecutive_failures", 0)
             
-            last_ingest = health.get("last_ingest", {})
-            ingest_str = f"{last_ingest.get('suppressed', 0)}/{last_ingest.get('processed', 0)}"
-            
-            print(f"{source_id:<25} {tier:<8} {last_success:<20} {success_rate:.2f}  {status_code:<6} {last_new:<6} {stale:<8} {ingest_str:<25}")
+            print(
+                f"{source_id:<25} "
+                f"{tier:<6} "
+                f"{score:>5} "
+                f"{success_rate:>5.0f}% "
+                f"{last_success_display:<19} "
+                f"{stale_display:>7} "
+                f"{consecutive_failures:>4} "
+                f"{status_code!s:>6} "
+                f"{suppression_pct:>7} "
+                f"{state:>8}"
+            )
         
         print()
+        
+        if args.explain_suppress:
+            source_id = args.explain_suppress
+            if source_id not in all_sources:
+                print(f"[WARN] Unknown source id '{source_id}' for suppression explanation.")
+                return
+            summary = summarize_suppression_reasons(
+                session,
+                source_id=source_id,
+                since_hours=stale_hours,
+            )
+            print(f"Suppression summary for {source_id} (last {stale_hours}h):")
+            total = summary.get("total", 0)
+            if total == 0:
+                print("  No suppressed items in the selected window.")
+                return
+            for reason in summary.get("reasons", []):
+                reason_code = reason.get("reason_code")
+                count = reason.get("count", 0)
+                rule_ids = reason.get("rule_ids", [])
+                print(f"  - {reason_code} :: {count} hits (rules: {', '.join(rule_ids) or 'n/a'})")
+                for sample in reason.get("samples", []):
+                    title = (sample.get("title") or "(no title)")[:60]
+                    stamped = sample.get("suppressed_at_utc", "")
+                    print(f"      • {stamped} — {title}")
+            print()
 
 
 def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> None:
@@ -355,7 +405,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                 
                 # Get source config for tier and trust_tier
                 source_config_raw = all_sources.get(source_id, {})
-                source_config = get_source_with_defaults(source_config_raw) if source_config_raw else {}
+                source_config = get_source_with_defaults(source_config_raw, sources_config) if source_config_raw else {}
                 tier = source_config.get("tier", "unknown")
                 trust_tier = source_config.get("trust_tier", 2)
                 
@@ -388,6 +438,12 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                 logger.info(f"Fetched {len(candidates)} items from {source_id}, {items_new} new")
                 
                 # Create FETCH phase SourceRun record
+                diagnostics_payload = {
+                    "bytes_downloaded": result.bytes_downloaded or 0,
+                    "dedupe_dropped": max(len(candidates) - items_new, 0),
+                    "items_seen": len(candidates),
+                }
+
                 create_source_run(
                     session,
                     run_group_id=run_group_id,
@@ -400,6 +456,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                     duration_seconds=result.duration_seconds,
                     items_fetched=len(candidates),
                     items_new=items_new,
+                    diagnostics=diagnostics_payload,
                 )
             
             session.commit()
@@ -612,6 +669,26 @@ def cmd_run(args: argparse.Namespace) -> None:
             pass  # Suppression config optional
         except Exception as e:
             logger.warning(f"Error checking suppression config: {e}")
+        
+        # Health budget summary
+        try:
+            stale_hours_value = _parse_since(stale_threshold) if stale_threshold else 48
+            if stale_hours_value is None:
+                stale_hours_value = 48
+            with session_context(sqlite_path) as session:
+                health_list = get_all_source_health(
+                    session,
+                    lookback_n=10,
+                    stale_threshold_hours=stale_hours_value,
+                )
+            blocked = [h["source_id"] for h in health_list if h.get("health_budget_state") == "BLOCKED"]
+            watch = [h["source_id"] for h in health_list if h.get("health_budget_state") == "WATCH"]
+            if blocked:
+                doctor_findings["health_budget_blockers"] = blocked
+            if watch:
+                doctor_findings["health_budget_warnings"] = watch
+        except Exception as e:
+            logger.warning(f"Error evaluating health budgets: {e}")
         
         # Check schema drift (check for required tables)
         try:
@@ -967,12 +1044,23 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                 else:
                     print("  [OK] source_runs table exists")
                     
+                    try:
+                        sources_config = load_sources_config()
+                        configured_sources = [s["id"] for s in get_all_sources(sources_config)]
+                    except Exception:
+                        configured_sources = None
+                    
                     # Count stale sources (no successful fetch in last 48h)
                     try:
                         with session_context(sqlite_path) as session:
                             from sentinel.database.source_run_repo import get_all_source_health
                             
-                            health_list = get_all_source_health(session, lookback_n=10)
+                            health_list = get_all_source_health(
+                                session,
+                                lookback_n=10,
+                                stale_threshold_hours=48,
+                                source_ids=configured_sources,
+                            )
                             stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
                             stale_cutoff_iso = stale_cutoff.isoformat()
                             
@@ -987,6 +1075,17 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                                 print(f"  [WARN] Stale sources (no success in 48h): {stale_count}")
                             else:
                                 print(f"  [OK] All sources healthy (last 48h)")
+                            
+                            blocked = [h for h in health_list if h.get("health_budget_state") == "BLOCKED"]
+                            watch = [h for h in health_list if h.get("health_budget_state") == "WATCH"]
+                            if blocked:
+                                blocked_ids = ", ".join(h["source_id"] for h in blocked)
+                                issues.append(f"{len(blocked)} source(s) exhausted failure budget: {blocked_ids}")
+                                print(f"  [X] Failure budget exhausted for: {blocked_ids}")
+                            if watch and not blocked:
+                                watch_ids = ", ".join(h["source_id"] for h in watch)
+                                warnings.append(f"{len(watch)} source(s) near failure budget: {watch_ids}")
+                                print(f"  [WARN] Failure budget warning for: {watch_ids}")
                             
                             if health_list:
                                 print(f"  [OK] Tracking health for {len(health_list)} sources")
@@ -1365,6 +1464,11 @@ def main() -> None:
         type=int,
         default=10,
         help="Number of recent runs to consider for success rate (default: 10)",
+    )
+    sources_health_parser.add_argument(
+        "--explain-suppress",
+        metavar="SOURCE_ID",
+        help="Show suppression reason summary for the specified source",
     )
     sources_health_parser.set_defaults(func=cmd_sources_health)
     

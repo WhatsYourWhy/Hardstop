@@ -69,11 +69,17 @@ def get_sources_health(
             stale_hours = int(stale_str[:-1]) * 24
     
     # Get health from database
-    health_list = get_all_source_health(session, lookback_n=lookback_n)
-    
-    # Get source configs for tier/enabled info
     sources_config = load_sources_config() if config is None else config
-    all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
+    normalized_sources = get_all_sources(sources_config)
+    all_sources = {s["id"]: s for s in normalized_sources}
+    source_ids = list(all_sources.keys())
+    
+    health_list = get_all_source_health(
+        session,
+        lookback_n=lookback_n,
+        stale_threshold_hours=stale_hours,
+        source_ids=source_ids,
+    )
     
     # Merge health with config
     stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=stale_hours)
@@ -100,6 +106,10 @@ def get_sources_health(
             "last_items_new": health.get("last_items_new", 0),
             "last_ingest": health.get("last_ingest"),
             "is_stale": is_stale,
+            "health_score": health.get("health_score"),
+            "health_budget_state": health.get("health_budget_state"),
+            "health_factors": health.get("health_factors", []),
+            "suppression_ratio": health.get("suppression_ratio"),
         })
     
     return merged

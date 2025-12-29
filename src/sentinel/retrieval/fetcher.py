@@ -10,7 +10,7 @@ import requests
 from pydantic import BaseModel, Field
 
 from sentinel.config.loader import get_all_sources, load_sources_config
-from sentinel.retrieval.adapters import RawItemCandidate, create_adapter
+from sentinel.retrieval.adapters import AdapterFetchResponse, RawItemCandidate, create_adapter
 from sentinel.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -26,6 +26,7 @@ class FetchResult(BaseModel):
     error: Optional[str] = None
     duration_seconds: Optional[float] = None
     items: List[RawItemCandidate] = Field(default_factory=list)
+    bytes_downloaded: int = 0
 
 
 class SourceFetcher:
@@ -153,6 +154,7 @@ class SourceFetcher:
             error = None
             candidates: List[RawItemCandidate] = []
             status = "SUCCESS"
+            bytes_downloaded = 0
             
             try:
                 # Rate limiting
@@ -171,7 +173,11 @@ class SourceFetcher:
                 # Try to capture status code from adapter's HTTP request
                 # We need to wrap the adapter.fetch() call to catch HTTP errors
                 try:
-                    candidates = adapter.fetch(since_hours=since_hours)
+                    adapter_response = adapter.fetch(since_hours=since_hours)
+                    candidates = adapter_response.items
+                    if adapter_response.status_code is not None:
+                        status_code = adapter_response.status_code
+                    bytes_downloaded = adapter_response.bytes_downloaded or 0
                     # If we get here, fetch succeeded (even if 0 items)
                     # Zero items = SUCCESS (quiet feeds are normal)
                     logger.info(f"Fetched {len(candidates)} items from {source_id}")
@@ -222,6 +228,7 @@ class SourceFetcher:
                 error=error,
                 duration_seconds=duration_seconds,
                 items=candidates,
+                bytes_downloaded=bytes_downloaded,
             )
             results.append(result)
         
@@ -277,6 +284,7 @@ class SourceFetcher:
         error = None
         candidates: List[RawItemCandidate] = []
         status = "SUCCESS"
+        bytes_downloaded = 0
         
         try:
             # Rate limiting
@@ -293,7 +301,11 @@ class SourceFetcher:
             logger.info(f"Fetching from {source_id} ({source.get('tier', 'unknown')} tier)")
             
             try:
-                candidates = adapter.fetch(since_hours=since_hours)
+                adapter_response = adapter.fetch(since_hours=since_hours)
+                candidates = adapter_response.items
+                if adapter_response.status_code is not None:
+                    status_code = adapter_response.status_code
+                bytes_downloaded = adapter_response.bytes_downloaded or 0
                 logger.info(f"Fetched {len(candidates)} items from {source_id}")
             except requests.RequestException as req_e:
                 if hasattr(req_e, 'response') and req_e.response is not None:
@@ -333,4 +345,5 @@ class SourceFetcher:
             error=error,
             duration_seconds=duration_seconds,
             items=candidates,
+            bytes_downloaded=bytes_downloaded,
         )

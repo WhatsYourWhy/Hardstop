@@ -44,6 +44,7 @@ def test_suppressed_item_marked_in_raw_items(session: Session):
         ["test_rule"],
         suppressed_at,
         "INGEST_EXTERNAL",
+        "noise",
     )
     session.commit()
     
@@ -84,6 +85,7 @@ def test_suppressed_item_not_in_ingest_query(session: Session):
         ["test_rule"],
         datetime.now(timezone.utc).isoformat(),
         "INGEST_EXTERNAL",
+        "noise",
     )
     session.commit()
     
@@ -136,6 +138,7 @@ def test_suppressed_item_creates_event_not_alert(session: Session):
         ["global_test_alerts"],
         datetime.now(timezone.utc).isoformat(),
         "INGEST_EXTERNAL",
+        "noise",
     )
     session.commit()
     
@@ -203,6 +206,7 @@ def test_explain_suppress_logs_decisions(session: Session, caplog):
         ["test_rule"],
         datetime.now(timezone.utc).isoformat(),
         "INGEST_EXTERNAL",
+        "noise",
     )
     session.commit()
     

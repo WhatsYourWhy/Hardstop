@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -199,6 +199,7 @@ def mark_raw_item_suppressed(
     matched_rule_ids: List[str],
     suppressed_at_utc: str,
     stage: str,
+    reason_code: Optional[str] = None,
 ) -> None:
     """
     Mark a raw item as suppressed with rule metadata.
@@ -221,6 +222,7 @@ def mark_raw_item_suppressed(
     raw_item.suppression_rule_ids_json = json.dumps(matched_rule_ids)
     raw_item.suppressed_at_utc = suppressed_at_utc
     raw_item.suppression_stage = stage
+    raw_item.suppression_reason_code = reason_code
     
     session.add(raw_item)
     logger.debug(f"Marked raw item {raw_id} as suppressed (rule: {primary_rule_id})")
@@ -247,3 +249,73 @@ def query_suppressed_items(
         RawItem.suppression_status == "SUPPRESSED",
         RawItem.suppressed_at_utc >= cutoff_iso,
     ).all()
+
+
+def summarize_suppression_reasons(
+    session: Session,
+    source_id: str,
+    since_hours: int = 72,
+    sample_size: int = 3,
+    limit: int = 5,
+) -> Dict[str, Any]:
+    """
+    Summarize suppression reasons for a source within the given window.
+
+    Returns:
+        {
+            "total": int,
+            "reasons": [
+                {
+                    "reason_code": str,
+                    "count": int,
+                    "rule_ids": List[str],
+                    "samples": [{"raw_id": str, "title": str, "suppressed_at_utc": str}],
+                },
+                ...
+            ],
+        }
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    cutoff_iso = cutoff.isoformat()
+
+    rows = session.query(RawItem).filter(
+        RawItem.source_id == source_id,
+        RawItem.suppression_status == "SUPPRESSED",
+        RawItem.suppressed_at_utc >= cutoff_iso,
+    ).order_by(RawItem.suppressed_at_utc.desc()).all()
+
+    summary = {}
+    for row in rows:
+        reason_code = row.suppression_reason_code or row.suppression_primary_rule_id or "unknown"
+        bucket = summary.setdefault(
+            reason_code,
+            {"count": 0, "rule_ids": set(), "samples": []},
+        )
+        bucket["count"] += 1
+        if row.suppression_primary_rule_id:
+            bucket["rule_ids"].add(row.suppression_primary_rule_id)
+        if len(bucket["samples"]) < sample_size:
+            bucket["samples"].append(
+                {
+                    "raw_id": row.raw_id,
+                    "title": row.title,
+                    "suppressed_at_utc": row.suppressed_at_utc,
+                }
+            )
+
+    results = []
+    for reason_code, data in summary.items():
+        results.append(
+            {
+                "reason_code": reason_code,
+                "count": data["count"],
+                "rule_ids": sorted(data["rule_ids"]),
+                "samples": data["samples"],
+            }
+        )
+
+    results.sort(key=lambda item: item["count"], reverse=True)
+    return {
+        "total": len(rows),
+        "reasons": results[:limit],
+    }

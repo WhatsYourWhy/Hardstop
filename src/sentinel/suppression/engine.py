@@ -144,17 +144,23 @@ def evaluate_suppression(
             primary_rule_id=None,
             matched_rule_ids=[],
             notes=[],
+            primary_reason_code=None,
+            reason_codes=[],
         )
     
     # Primary rule is first match (deterministic ordering)
     primary_rule = matched_rules[0]
     matched_rule_ids = [rule.id for rule in matched_rules]
     notes = [rule.note for rule in matched_rules if rule.note]
+    reason_codes = [rule.get_reason_code() for rule in matched_rules]
+    primary_reason_code = reason_codes[0] if reason_codes else None
     
     return SuppressionResult(
         is_suppressed=True,
         primary_rule_id=primary_rule.id,
         matched_rule_ids=matched_rule_ids,
         notes=notes,
+        primary_reason_code=primary_reason_code,
+        reason_codes=reason_codes,
     )
 

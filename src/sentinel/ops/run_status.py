@@ -60,6 +60,12 @@ def evaluate_run_status(
         messages.append("No enabled sources configured")
         return (2, messages)
     
+    # 5. Failure budget blockers from health scoring
+    health_blockers = doctor_findings.get("health_budget_blockers") or []
+    if health_blockers:
+        messages.append(f"{len(health_blockers)} source(s) exhausted failure budget")
+        return (2, messages)
+    
     # 4. All enabled sources failed fetch (no successes) AND none fetched quietly
     if fetch_results:
         successful_fetches = [r for r in fetch_results if r.status == "SUCCESS"]
@@ -103,6 +109,10 @@ def evaluate_run_status(
     if doctor_findings.get("suppression_warnings"):
         for warning in doctor_findings["suppression_warnings"]:
             warning_messages.append(f"Suppression: {warning}")
+    
+    health_watch = doctor_findings.get("health_budget_warnings") or []
+    if health_watch:
+        warning_messages.append(f"{len(health_watch)} source(s) near failure budget")
     
     # If we have warnings, set exit code to 1 (unless strict mode)
     if warning_messages:

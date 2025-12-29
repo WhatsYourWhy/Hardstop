@@ -29,4 +29,6 @@ class SuppressionResult(BaseModel):
     primary_rule_id: Optional[str] = Field(default=None, description="First matching rule ID (deterministic)")
     matched_rule_ids: List[str] = Field(default_factory=list, description="All matching rule IDs")
     notes: List[str] = Field(default_factory=list, description="Optional human-readable notes from matched rules")
+    primary_reason_code: Optional[str] = Field(default=None, description="Stable reason code for analytics")
+    reason_codes: List[str] = Field(default_factory=list, description="Reason codes for all matching rules")
 

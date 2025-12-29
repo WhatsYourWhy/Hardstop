@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.1.0] - 2025-XX-XX
+
+### Added
+- Canonical source registry with tier defaults
+  - `tier_defaults` section folds trust tier, classification floor, and weighting bias per tier
+  - Loader normalizes every source so CLI paths share the same schema
+- Adapter diagnostics + fetch telemetry
+  - RSS/NWS/FEMA adapters report HTTP status and bytes downloaded
+  - `FetchResult` now captures `bytes_downloaded` for deterministic audit trails
+- Structured source health scoring
+  - New health score (0-100) plus failure-budget states (`HEALTHY`, `WATCH`, `BLOCKED`)
+  - `sentinel sources health` surfaces scores, failure streaks, and suppression ratios
+  - `sentinel doctor` and `sentinel run --strict` gate on exhausted budgets
+- Suppression observability
+  - Every suppression decision records a stable reason code
+  - `sentinel sources health --explain-suppress <id>` prints reason counts with deterministic samples
+- Database diagnostics
+  - `source_runs.diagnostics_json` stores fetch/ingest envelopes (bytes, dedupe, suppression reasons)
+  - Raw items/events include `suppression_reason_code` for trend queries
+
+### Changed
+- `cmd_fetch`/`cmd_sources_test` persist fetch diagnostics (bytes downloaded, dedupe counts)
+- `ingest_external` aggregates suppression reason counts per SourceRun
+- `evaluate_run_status` treats failure-budget blockers as exit code 2 and warnings in strict mode
+- Doctor command now reports failure-budget warnings/blockers alongside stale counts
+
+### Technical
+- New helper `sentinel.ops.source_health.compute_health_score`
+- `sentinel.config.loader` normalization utilities with tier-aware defaults
+- `summarize_suppression_reasons()` helper for CLI explain output
+- Tests cover health scoring, suppression summaries, and failure-budget gating
+# Changelog
+
 ## [1.0.0] - 2024-XX-XX
 
 ### Added

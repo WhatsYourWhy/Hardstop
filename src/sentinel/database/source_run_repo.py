@@ -1,12 +1,14 @@
-"""Repository functions for source_runs table operations (v0.9)."""
+"""Repository functions for source_runs table operations (v1.1)."""
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from sentinel.database.schema import SourceRun
+from sentinel.ops.source_health import compute_health_score
 from sentinel.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -28,6 +30,7 @@ def create_source_run(
     items_suppressed: int = 0,
     items_events_created: int = 0,
     items_alerts_touched: int = 0,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> SourceRun:
     """
     Create a SourceRun record.
@@ -48,12 +51,15 @@ def create_source_run(
         items_suppressed: Number of items suppressed (INGEST phase)
         items_events_created: Number of events created (INGEST phase)
         items_alerts_touched: Number of alerts created/updated (INGEST phase)
+        diagnostics: Optional structured diagnostics for observability
         
     Returns:
         SourceRun row
     """
     run_id = str(uuid.uuid4())
     
+    diagnostics_json = json.dumps(diagnostics) if diagnostics else None
+
     source_run = SourceRun(
         run_id=run_id,
         run_group_id=run_group_id,
@@ -70,6 +76,7 @@ def create_source_run(
         items_suppressed=items_suppressed,
         items_events_created=items_events_created,
         items_alerts_touched=items_alerts_touched,
+        diagnostics_json=diagnostics_json,
     )
     
     session.add(source_run)
@@ -112,10 +119,29 @@ def list_recent_runs(
     return query.order_by(SourceRun.run_at_utc.desc()).limit(limit).all()
 
 
+def _load_diagnostics(row: SourceRun) -> Dict[str, Any]:
+    if not row.diagnostics_json:
+        return {}
+    try:
+        return json.loads(row.diagnostics_json)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _parse_iso_timestamp(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def get_source_health(
     session: Session,
     source_id: str,
     lookback_n: int = 10,
+    stale_threshold_hours: int = 48,
 ) -> Dict:
     """
     Get health metrics for a specific source.
@@ -154,7 +180,24 @@ def get_source_health(
     last_items_fetched = 0
     last_items_new = 0
     
+    fetch_durations: List[float] = []
+    bytes_downloaded: List[int] = []
+    dedupe_rates: List[float] = []
+    consecutive_failures = 0
+    max_failure_streak_computed = False
+
     for run in fetch_runs:
+        diagnostics = _load_diagnostics(run)
+        if run.duration_seconds:
+            fetch_durations.append(run.duration_seconds)
+        if diagnostics.get("bytes_downloaded") is not None:
+            bytes_downloaded.append(int(diagnostics.get("bytes_downloaded") or 0))
+        items_seen = diagnostics.get("items_seen")
+        dedupe_dropped = diagnostics.get("dedupe_dropped")
+        if items_seen:
+            dropped = dedupe_dropped or 0
+            dedupe_rates.append(dropped / max(items_seen, 1))
+
         if run.status == "SUCCESS" and last_success_utc is None:
             last_success_utc = run.run_at_utc
             if last_status_code is None:
@@ -169,6 +212,12 @@ def get_source_health(
                 last_status_code = run.status_code
             if last_error is None:
                 last_error = run.error
+
+        if not max_failure_streak_computed:
+            if run.status == "FAILURE":
+                consecutive_failures += 1
+            else:
+                max_failure_streak_computed = True
     
     # Get most recent FETCH run for status_code/error/items (if not already set)
     if fetch_runs:
@@ -189,16 +238,41 @@ def get_source_health(
         "suppressed": 0,
         "events": 0,
         "alerts": 0,
+        "suppression_reason_counts": {},
     }
     
     if ingest_runs:
         run = ingest_runs[0]
+        diagnostics = _load_diagnostics(run)
         last_ingest = {
             "processed": run.items_processed,
             "suppressed": run.items_suppressed,
             "events": run.items_events_created,
             "alerts": run.items_alerts_touched,
+            "suppression_reason_counts": diagnostics.get("suppression_reason_counts", {}),
         }
+
+    suppression_ratio = None
+    if last_ingest["processed"]:
+        suppression_ratio = last_ingest["suppressed"] / max(last_ingest["processed"], 1)
+
+    last_success_dt = _parse_iso_timestamp(last_success_utc)
+    stale_hours = None
+    if last_success_dt:
+        stale_hours = (datetime.now(timezone.utc) - last_success_dt).total_seconds() / 3600
+
+    metrics_snapshot = {
+        "success_rate": success_rate,
+        "stale_hours": stale_hours,
+        "consecutive_failures": consecutive_failures,
+        "last_status_code": last_status_code,
+        "last_error": last_error,
+        "avg_bytes_downloaded": sum(bytes_downloaded) / len(bytes_downloaded) if bytes_downloaded else 0,
+        "dedupe_rate": sum(dedupe_rates) / len(dedupe_rates) if dedupe_rates else None,
+        "suppression_ratio": suppression_ratio,
+        "avg_duration_seconds": sum(fetch_durations) / len(fetch_durations) if fetch_durations else None,
+    }
+    score_result = compute_health_score(metrics_snapshot, stale_threshold_hours=stale_threshold_hours)
     
     return {
         "last_success_utc": last_success_utc,
@@ -209,12 +283,23 @@ def get_source_health(
         "last_items_fetched": last_items_fetched,
         "last_items_new": last_items_new,
         "last_ingest": last_ingest,
+        "suppression_ratio": suppression_ratio,
+        "stale_hours": stale_hours,
+        "consecutive_failures": consecutive_failures,
+        "avg_bytes_downloaded": metrics_snapshot["avg_bytes_downloaded"],
+        "dedupe_rate": metrics_snapshot["dedupe_rate"],
+        "avg_duration_seconds": metrics_snapshot["avg_duration_seconds"],
+        "health_score": score_result.score,
+        "health_budget_state": score_result.budget_state,
+        "health_factors": score_result.factors,
     }
 
 
 def get_all_source_health(
     session: Session,
     lookback_n: int = 10,
+    stale_threshold_hours: int = 48,
+    source_ids: Optional[List[str]] = None,
 ) -> List[Dict]:
     """
     Get health metrics for all sources.
@@ -226,14 +311,20 @@ def get_all_source_health(
     Returns:
         List of health dicts, one per source_id
     """
-    # Get all unique source_ids
-    source_ids = session.query(SourceRun.source_id).distinct().all()
-    source_ids = [row[0] for row in source_ids]
+    # Determine which sources to include
+    if source_ids is None:
+        source_rows = session.query(SourceRun.source_id).distinct().all()
+        source_ids = [row[0] for row in source_rows]
     
     # Get health for each source
     health_list = []
     for source_id in source_ids:
-        health = get_source_health(session, source_id, lookback_n=lookback_n)
+        health = get_source_health(
+            session,
+            source_id,
+            lookback_n=lookback_n,
+            stale_threshold_hours=stale_threshold_hours,
+        )
         health["source_id"] = source_id
         health_list.append(health)
     

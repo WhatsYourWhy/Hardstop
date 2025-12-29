@@ -21,6 +21,14 @@ class RawItemCandidate(BaseModel):
     payload: Dict  # Full original record
 
 
+class AdapterFetchResponse(BaseModel):
+    """Combined adapter payload with diagnostics for fetcher consumption."""
+
+    items: List[RawItemCandidate]
+    status_code: Optional[int] = None
+    bytes_downloaded: int = 0
+
+
 class SourceAdapter(ABC):
     """Abstract base class for source adapters."""
     
@@ -34,7 +42,7 @@ class SourceAdapter(ABC):
         self.max_items = source_config.get("max_items_per_fetch") or defaults.get("max_items_per_fetch", 50)
     
     @abstractmethod
-    def fetch(self, since_hours: Optional[int] = None) -> List[RawItemCandidate]:
+    def fetch(self, since_hours: Optional[int] = None) -> AdapterFetchResponse:
         """
         Fetch items from the source.
         
@@ -42,7 +50,7 @@ class SourceAdapter(ABC):
             since_hours: Only fetch items published within this many hours (optional)
             
         Returns:
-            List of RawItemCandidate objects
+            AdapterFetchResponse containing items plus diagnostics
         """
         pass
     
@@ -57,7 +65,7 @@ class SourceAdapter(ABC):
 class RSSAdapter(SourceAdapter):
     """Adapter for RSS/Atom feeds."""
     
-    def fetch(self, since_hours: Optional[int] = None) -> List[RawItemCandidate]:
+    def fetch(self, since_hours: Optional[int] = None) -> AdapterFetchResponse:
         """Fetch items from RSS/Atom feed."""
         try:
             response = requests.get(
@@ -118,7 +126,12 @@ class RSSAdapter(SourceAdapter):
                     payload=payload,
                 ))
             
-            return candidates
+            bytes_downloaded = len(response.content or b"")
+            return AdapterFetchResponse(
+                items=candidates,
+                status_code=response.status_code,
+                bytes_downloaded=bytes_downloaded,
+            )
             
         except requests.RequestException as e:
             raise RuntimeError(f"Failed to fetch RSS feed {self.url}: {e}") from e
@@ -136,7 +149,7 @@ class NWSAlertsAdapter(SourceAdapter):
             "Accept": "application/geo+json",  # NWS prefers geo+json
         }
     
-    def fetch(self, since_hours: Optional[int] = None) -> List[RawItemCandidate]:
+    def fetch(self, since_hours: Optional[int] = None) -> AdapterFetchResponse:
         """Fetch items from NWS Alerts API."""
         try:
             response = requests.get(
@@ -211,7 +224,12 @@ class NWSAlertsAdapter(SourceAdapter):
                     payload=payload,
                 ))
             
-            return candidates
+            bytes_downloaded = len(response.content or b"")
+            return AdapterFetchResponse(
+                items=candidates,
+                status_code=response.status_code,
+                bytes_downloaded=bytes_downloaded,
+            )
             
         except requests.RequestException as e:
             raise RuntimeError(f"Failed to fetch NWS alerts from {self.url}: {e}") from e
@@ -222,7 +240,7 @@ class NWSAlertsAdapter(SourceAdapter):
 class FEMAAdapter(SourceAdapter):
     """Adapter for FEMA/IPAWS feeds (can be RSS or JSON)."""
     
-    def fetch(self, since_hours: Optional[int] = None) -> List[RawItemCandidate]:
+    def fetch(self, since_hours: Optional[int] = None) -> AdapterFetchResponse:
         """
         Fetch items from FEMA/IPAWS feed.
         Tries to detect format (RSS vs JSON) and uses appropriate parser.
@@ -239,10 +257,16 @@ class FEMAAdapter(SourceAdapter):
             
             # Try RSS/Atom first
             if "xml" in content_type or "rss" in content_type or "atom" in content_type:
-                return self._parse_rss_response(response, since_hours)
+                items = self._parse_rss_response(response, since_hours)
             else:
-                # Assume JSON
-                return self._parse_json_response(response, since_hours)
+                items = self._parse_json_response(response, since_hours)
+
+            bytes_downloaded = len(response.content or b"")
+            return AdapterFetchResponse(
+                items=items,
+                status_code=response.status_code,
+                bytes_downloaded=bytes_downloaded,
+            )
                 
         except requests.RequestException as e:
             raise RuntimeError(f"Failed to fetch FEMA feed from {self.url}: {e}") from e

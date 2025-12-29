@@ -172,7 +172,7 @@ sentinel sources list
 sentinel sources test <source_id> [--since 24h] [--max-items 20] [--ingest]
 
 # View source health table
-sentinel sources health [--stale 48h] [--lookback 10]
+sentinel sources health [--stale 48h] [--lookback 10] [--explain-suppress <source_id>]
 ```
 
 #### Fetching and Ingestion
@@ -215,7 +215,11 @@ sentinel init [--force]
 
 #### Source Configuration (`config/sources.yaml`)
 
-Define external sources with metadata:
+Define external sources with metadata. Defaults are layered:
+
+- `defaults`: HTTP/client behavior (timeout, max items, user agent).
+- `tier_defaults`: trust-aware tuning for each tier (global, regional, local) that sets `trust_tier`, `classification_floor`, and `weighting_bias`.
+- Per-source overrides: anything specified on the source wins over tier defaults.
 
 - **id**: Unique source identifier
 - **type**: Source adapter type (rss, nws_alerts)
@@ -232,6 +236,17 @@ Define external sources with metadata:
 
 **Example:**
 ```yaml
+tier_defaults:
+  global:
+    trust_tier: 3
+    classification_floor: 0
+    weighting_bias: 0
+  regional:
+    trust_tier: 2
+  local:
+    trust_tier: 1
+    weighting_bias: -1
+
 tiers:
   global:
     - id: nws_active_us
@@ -278,9 +293,12 @@ Sentinel tracks the health of all sources:
 - **Stale Detection**: Sources that haven't succeeded in X hours
 - **Ingest Metrics**: Items processed, suppressed, events created, alerts touched
 - **Error Tracking**: Last error message and status code
+- **Health Score & Failure Budgets**: Each source receives a deterministic 0-100 score. Falling below the failure-budget threshold marks the source as `WATCH` (warning) or `BLOCKED` (gating downstream phases).
+- **Suppression Analytics**: Reason codes and samples are captured per source so noisy rules can be tuned.
 
 **Commands:**
 - `sentinel sources health`: View health table for all sources
+- `sentinel sources health --explain-suppress <id>`: Print suppression reason codes and samples for a source
 - `sentinel sources test <id>`: Test a specific source and view results
 - `sentinel doctor`: Includes source health checks and recommendations
 

@@ -4,6 +4,11 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 
+from sentinel.database.raw_item_repo import (
+    mark_raw_item_suppressed,
+    save_raw_item,
+    summarize_suppression_reasons,
+)
 from sentinel.database.source_run_repo import (
     create_source_run,
     get_source_health,
@@ -12,7 +17,7 @@ from sentinel.database.source_run_repo import (
 )
 from sentinel.database.schema import SourceRun
 from sentinel.retrieval.fetcher import FetchResult, SourceFetcher
-from sentinel.retrieval.adapters import RawItemCandidate
+from sentinel.retrieval.adapters import AdapterFetchResponse, RawItemCandidate
 
 
 def test_fetcher_captures_status_code_200(session):
@@ -22,7 +27,7 @@ def test_fetcher_captures_status_code_200(session):
     # Mock a successful fetch
     with patch('sentinel.retrieval.fetcher.create_adapter') as mock_adapter:
         mock_adapter_instance = Mock()
-        mock_adapter_instance.fetch.return_value = []
+        mock_adapter_instance.fetch.return_value = AdapterFetchResponse(items=[])
         mock_adapter.return_value = mock_adapter_instance
         
         # Mock source config
@@ -49,7 +54,7 @@ def test_fetcher_zero_items_is_success(session):
     
     with patch('sentinel.retrieval.fetcher.create_adapter') as mock_adapter:
         mock_adapter_instance = Mock()
-        mock_adapter_instance.fetch.return_value = []  # Zero items
+        mock_adapter_instance.fetch.return_value = AdapterFetchResponse(items=[])  # Zero items
         mock_adapter.return_value = mock_adapter_instance
         
         with patch('sentinel.retrieval.fetcher.get_all_sources') as mock_get_sources:
@@ -173,6 +178,66 @@ def test_get_all_source_health(session):
     
     source_ids = {h["source_id"] for h in health_list}
     assert source_ids == {"source1", "source2"}
+
+
+def test_health_score_budget_fields(session):
+    """Ensure health scoring populates budget state and score."""
+    source_id = "score_source"
+    now = datetime.now(timezone.utc)
+    
+    for i in range(3):
+        create_source_run(
+            session,
+            run_group_id=f"group-{i}",
+            source_id=source_id,
+            phase="FETCH",
+            run_at_utc=(now - timedelta(hours=i)).isoformat(),
+            status="FAILURE",
+            status_code=500,
+            items_fetched=0,
+            items_new=0,
+        )
+    
+    session.commit()
+    
+    health = get_source_health(session, source_id, lookback_n=3, stale_threshold_hours=48)
+    assert "health_score" in health
+    assert "health_budget_state" in health
+    assert health["health_budget_state"] in {"HEALTHY", "WATCH", "BLOCKED"}
+    assert health["health_score"] <= 50  # consecutive failures should penalize heavily
+
+
+def test_summarize_suppression_reasons(session):
+    """Summaries include reason codes and sample titles."""
+    now = datetime.now(timezone.utc).isoformat()
+    raw_item = save_raw_item(
+        session,
+        source_id="summary_source",
+        tier="global",
+        candidate={
+            "canonical_id": "supp-1",
+            "title": "Test suppression",
+            "payload": {"title": "Test suppression"},
+            "published_at_utc": now,
+        },
+    )
+    session.commit()
+    
+    mark_raw_item_suppressed(
+        session,
+        raw_item.raw_id,
+        "rule_noise",
+        ["rule_noise"],
+        now,
+        "INGEST_EXTERNAL",
+        "noise",
+    )
+    session.commit()
+    
+    summary = summarize_suppression_reasons(session, "summary_source", since_hours=24)
+    assert summary["total"] == 1
+    assert summary["reasons"][0]["reason_code"] == "noise"
+    assert summary["reasons"][0]["count"] == 1
 
 
 def test_list_recent_runs_with_filters(session):
