@@ -288,6 +288,10 @@ Layers used in practice:
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full runtime specification and operator taxonomy, and refer to [docs/specs/run-record.schema.json](docs/specs/run-record.schema.json) for the RunRecord contract used by every operator execution.
 
+### Run Records in Practice
+
+Running `sentinel run` now emits a RunRecord JSON document under `run_records/`. Each record includes the merged configuration fingerprint, execution mode (strict vs best-effort), hashed references to the run group id, and the resolved run-status diagnostics. The schema matches `docs/specs/run-record.schema.json`, so you can validate or replay runs in downstream tooling by pointing a JSON Schema validator at the generated files.
+
 ## Execution Plan
 
 We translate the architecture above into a prioritized execution plan so every

@@ -38,7 +38,9 @@ def evaluate_run_status(
     doctor_findings = doctor_findings or {}
     stale_sources = stale_sources or []
     fetch_results = fetch_results or []
+    ingest_runs_provided = ingest_runs
     ingest_runs = ingest_runs or []
+    ingest_data_available = ingest_runs_provided is not None
     
     # Check for BROKEN conditions (exit code 2)
     
@@ -71,7 +73,7 @@ def evaluate_run_status(
     
     # 5. Ingest crashed before processing any source
     # Check if we have items to ingest but no ingest runs
-    if fetch_results and not ingest_runs:
+    if fetch_results and ingest_data_available and not ingest_runs:
         successful_fetches_with_items = [r for r in fetch_results if r.status == "SUCCESS" and len(r.items) > 0]
         if successful_fetches_with_items:
             # We have items to ingest but no ingest runs - likely a crash

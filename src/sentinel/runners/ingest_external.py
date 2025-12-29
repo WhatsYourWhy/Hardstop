@@ -161,6 +161,44 @@ def main(
         source_error_msg = None
         ingest_status = "SUCCESS"
         source_run_written = False  # Track if SourceRun was created in except block
+        fatal_failure = False
+
+        def _persist_source_run(
+            status: str,
+            error_msg: Optional[str],
+            duration_seconds: float,
+            *,
+            skip_commit: bool = False,
+        ) -> None:
+            """Persist a single INGEST SourceRun row for the current source."""
+            nonlocal source_run_written
+            if source_run_written:
+                return
+            source_run_written = True
+            run_at_utc = datetime.now(timezone.utc).isoformat()
+            create_source_run(
+                session=session,
+                run_group_id=run_group_id,
+                source_id=source_id,
+                phase="INGEST",
+                run_at_utc=run_at_utc,
+                status=status,
+                status_code=None,
+                error=error_msg,
+                duration_seconds=duration_seconds,
+                items_processed=source_processed,
+                items_suppressed=source_suppressed,
+                items_events_created=source_events,
+                items_alerts_touched=source_alerts,
+            )
+            if skip_commit:
+                session.rollback()
+            else:
+                try:
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    raise
         
         # Contract: One INGEST SourceRun per source_id per run_group_id, regardless of item failures.
         # 
@@ -296,8 +334,20 @@ def main(
                     except Exception as rollback_error:
                         logger.error(f"Failed to rollback and mark status: {rollback_error}")
                         session.rollback()
+                        fatal_failure = True
+                        raise
                     source_errors += 1
                     stats["errors"] += 1
+                    source_processed += 1
+                    stats["processed"] += 1
+                    truncated_error = error_msg[:1000] if error_msg else None
+                    if source_error_msg is None:
+                        source_error_msg = truncated_error
+                    if fail_fast:
+                        ingest_status = "FAILURE"
+                        duration_seconds = time.monotonic() - source_start_time
+                        _persist_source_run("FAILURE", source_error_msg, duration_seconds)
+                        raise
             
         except Exception as batch_error:
             # Source batch failed catastrophically (v1.0)
@@ -311,27 +361,10 @@ def main(
             source_duration = time.monotonic() - source_start_time
             
             # Create SourceRun BEFORE potentially re-raising (guaranteed creation, v1.0)
-            run_at_utc = datetime.now(timezone.utc).isoformat()
-            create_source_run(
-                session,
-                run_group_id=run_group_id,
-                source_id=source_id,
-                phase="INGEST",
-                run_at_utc=run_at_utc,
-                status="FAILURE",
-                status_code=None,  # INGEST phase doesn't have HTTP status codes
-                error=source_error_msg,
-                duration_seconds=source_duration,
-                items_processed=source_processed,
-                items_suppressed=source_suppressed,
-                items_events_created=source_events,
-                items_alerts_touched=source_alerts,
-            )
-            session.commit()  # Commit must succeed before marking as written
-            source_run_written = True  # Mark as written (only after successful commit)
+            _persist_source_run("FAILURE", source_error_msg, source_duration, skip_commit=fatal_failure)
             
             # NOW re-raise if fail_fast (after SourceRun is safely created)
-            if fail_fast:
+            if fail_fast or fatal_failure:
                 raise
         
         # Only create SourceRun if it wasn't already created in except block
@@ -340,30 +373,12 @@ def main(
             source_duration = time.monotonic() - source_start_time
             
             # Create INGEST phase SourceRun record for this source (v0.9, v1.0: guaranteed)
-            run_at_utc = datetime.now(timezone.utc).isoformat()
-            
-            # Determine error message
-            if source_errors > 0:
-                source_error_msg = f"{source_errors} error(s) during processing"
+            if ingest_status == "FAILURE":
+                final_error_msg = source_error_msg or f"{source_errors} error(s) during processing"
             else:
-                source_error_msg = None
+                final_error_msg = None
             
-            create_source_run(
-                session,
-                run_group_id=run_group_id,
-                source_id=source_id,
-                phase="INGEST",
-                run_at_utc=run_at_utc,
-                status=ingest_status,
-                status_code=None,  # INGEST phase doesn't have HTTP status codes
-                error=source_error_msg,
-                duration_seconds=source_duration,
-                items_processed=source_processed,
-                items_suppressed=source_suppressed,
-                items_events_created=source_events,
-                items_alerts_touched=source_alerts,
-            )
-            session.commit()
+            _persist_source_run(ingest_status, final_error_msg, source_duration)
         
         # Log source summary (runs for both success and failure cases)
         logger.info(

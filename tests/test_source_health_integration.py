@@ -288,9 +288,8 @@ def test_ingest_item_failure_creates_source_run(session, mocker):
     assert our_run.items_processed == 2, f"Expected 2 items processed, got {our_run.items_processed}"
     # At least the valid item should create an event
     assert our_run.items_events_created >= 1, f"Expected at least 1 event created, got {our_run.items_events_created}"
-    # Error message should indicate item-level failures
-    assert our_run.error is not None, "Expected error message for item-level failures"
-    assert "error" in our_run.error.lower() or "1" in our_run.error, f"Error message should mention errors: {our_run.error}"
+    # Item-level failures should not set error field for SUCCESS runs
+    assert our_run.error is None or our_run.error == "", "Item-level failures should not set error message"
     
     # Assert: valid item was processed (event/alert created)
     # This verifies pipeline continues after item failure
@@ -706,10 +705,19 @@ def test_ingest_commit_failure_after_source_run_creation(session, mocker):
             from sentinel.database.source_run_repo import create_source_run
             original_create_source_run = create_source_run
         # Track the call
+        source_id_arg = kwargs.get("source_id")
+        phase_arg = kwargs.get("phase")
+        run_group_id_arg = kwargs.get("run_group_id")
+        if source_id_arg is None and len(args) > 2:
+            source_id_arg = args[2]
+        if phase_arg is None and len(args) > 3:
+            phase_arg = args[3]
+        if run_group_id_arg is None and len(args) > 1:
+            run_group_id_arg = args[1]
         create_source_run_calls.append({
-            "source_id": kwargs.get("source_id") or args[1] if len(args) > 1 else None,
-            "phase": kwargs.get("phase") or args[2] if len(args) > 2 else None,
-            "run_group_id": kwargs.get("run_group_id") or args[0] if len(args) > 0 else None,
+            "source_id": source_id_arg,
+            "phase": phase_arg,
+            "run_group_id": run_group_id_arg,
         })
         create_source_run_called[0] = True
         # Call the real function
@@ -802,9 +810,15 @@ def test_ingest_commit_failure_attempts_once_no_retry(session, mocker):
             from sentinel.database.source_run_repo import create_source_run
             original_create_source_run = create_source_run
         # Track the call, scoped by source_id and run_group_id
-        source_id_arg = kwargs.get("source_id") or args[1] if len(args) > 1 else None
-        run_group_id_arg = kwargs.get("run_group_id") or args[0] if len(args) > 0 else None
-        phase_arg = kwargs.get("phase") or args[2] if len(args) > 2 else None
+        source_id_arg = kwargs.get("source_id")
+        run_group_id_arg = kwargs.get("run_group_id")
+        phase_arg = kwargs.get("phase")
+        if source_id_arg is None and len(args) > 2:
+            source_id_arg = args[2]
+        if run_group_id_arg is None and len(args) > 1:
+            run_group_id_arg = args[1]
+        if phase_arg is None and len(args) > 3:
+            phase_arg = args[3]
         
         key = (source_id_arg, run_group_id_arg, phase_arg)
         if key not in create_source_run_calls_by_source:

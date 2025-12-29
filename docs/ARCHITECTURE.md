@@ -112,6 +112,8 @@ A local persistent store (SQLite by default) supports:
 
 The RunRecord is the backbone for replay, audit, and billing-like accounting.
 
+Implementation note: `sentinel.ops.run_record` contains the canonical emitter. CLI surfaces such as `sentinel run` persist RunRecords under `run_records/`, ensuring every execution captures the config fingerprint and run-status diagnostics.
+
 ---
 
 ## Fingerprinting & Replayability
@@ -203,6 +205,7 @@ Adapters must define paging/rate-limit behavior, cap payload sizes, produce cano
 ## Testing Strategy
 
 1. **Determinism tests** — same inputs + config → same output hashes.
+   - `tests/test_golden_run.py` locks the SHA-256 hash for the demo event fixture so regressions are detected immediately.
 2. **Boundedness tests** — enforce max bytes/items/window per operator.
 3. **Provenance tests** — RunRecords exist and reference the correct inputs/outputs.
 4. **Migration tests** — additive migrations run cleanly and keep legacy artifacts readable.

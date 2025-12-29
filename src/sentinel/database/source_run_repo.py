@@ -83,6 +83,7 @@ def list_recent_runs(
     source_id: Optional[str] = None,
     limit: int = 50,
     phase: Optional[str] = None,
+    run_group_id: Optional[str] = None,
 ) -> List[SourceRun]:
     """
     Query recent source runs with optional filters.
@@ -92,6 +93,7 @@ def list_recent_runs(
         source_id: Filter by source ID (optional)
         limit: Maximum number of runs to return
         phase: Filter by phase (FETCH or INGEST, optional)
+        run_group_id: Filter by run_group_id (optional)
         
     Returns:
         List of SourceRun rows, ordered by run_at_utc DESC
@@ -103,6 +105,9 @@ def list_recent_runs(
     
     if phase:
         query = query.filter(SourceRun.phase == phase)
+    
+    if run_group_id:
+        query = query.filter(SourceRun.run_group_id == run_group_id)
     
     return query.order_by(SourceRun.run_at_utc.desc()).limit(limit).all()
 

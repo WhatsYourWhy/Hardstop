@@ -1,12 +1,13 @@
 """CLI entrypoint for Sentinel agent."""
 
 import argparse
+import hashlib
 import shutil
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import requests
 
@@ -30,12 +31,14 @@ from sentinel.database.raw_item_repo import save_raw_item
 from sentinel.database.schema import Alert, Event, RawItem, SourceRun
 from sentinel.database.source_run_repo import create_source_run, list_recent_runs
 from sentinel.database.sqlite_client import session_context
-from sentinel.output.daily_brief import (
-    _parse_since,
-    generate_brief,
-    render_json,
-    render_markdown,
+from sentinel.output.daily_brief import generate_brief, render_json, render_markdown
+from sentinel.ops.run_record import (
+    ArtifactRef,
+    Diagnostic,
+    emit_run_record,
+    resolve_config_snapshot,
 )
+from sentinel.api.brief_api import _parse_since
 from sentinel.retrieval.fetcher import FetchResult, SourceFetcher
 from sentinel.runners.ingest_external import main as ingest_external_main
 from sentinel.runners.load_network import main as load_network_main
@@ -471,6 +474,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     
     # Generate single run_group_id for entire execution (v0.9)
     run_group_id = str(uuid.uuid4())
+    config_snapshot = resolve_config_snapshot()
     
     config = load_config()
     sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
@@ -653,6 +657,35 @@ def cmd_run(args: argparse.Namespace) -> None:
         for msg in messages[:3]:
             print(f"  - {msg}")
     print(f"{'=' * 50}\n")
+
+    try:
+        diagnostics: List[Diagnostic] = [
+            Diagnostic(code=f"RUN_STATUS::{exit_code}", message=msg)
+            for msg in messages
+        ]
+        emit_run_record(
+            operator_id="sentinel.run@1.0.0",
+            mode="strict" if strict_mode else "best-effort",
+            config_snapshot=config_snapshot,
+            input_refs=[
+                ArtifactRef(
+                    id=f"run-group:{run_group_id}",
+                    hash=hashlib.sha256(run_group_id.encode("utf-8")).hexdigest(),
+                    kind="RunGroup",
+                )
+            ],
+            output_refs=[
+                ArtifactRef(
+                    id=f"run-status:{run_group_id}",
+                    hash=hashlib.sha256("||".join(messages).encode("utf-8")).hexdigest(),
+                    kind="RunStatus",
+                )
+            ],
+            warnings=diagnostics if exit_code == 1 else [],
+            errors=diagnostics if exit_code == 2 else [],
+        )
+    except Exception as record_error:
+        logger.warning("Failed to emit run record: %s", record_error)
     
     # Exit with code
     sys.exit(exit_code)
