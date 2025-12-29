@@ -91,6 +91,33 @@ foundational dependencies to user-facing integrations.
 - **Failure budget automation**: wire the health data into `sentinel doctor`
   so unhealthy sources block progression to downstream phases when appropriate.
 
+#### P1 Execution Next Steps (Active)
+
+1. **Canonical source registry + tier defaults**
+   - Produce a documented schema (lightweight spec doc + example YAML) that folds trust tier weighting, classification floors, weighting bias, and suppression overrides into a single source definition. Reference files: `config/sources.yaml`, `config/sources.example.yaml`, and `sentinel/config/loader.py`.
+   - Update the loader so every CLI path (`sentinel sources list|health|test`) consumes the same normalized object. Add regression coverage in `tests/test_cli_sources.py` for tier defaults and schema validation errors.
+   - *Exit criteria:* configuration diffs for a tier flip only change the trust tier field; health commands show tier + weighting bias without additional plumbing.
+
+2. **Persisted health telemetry + scoring math**
+   - Extend `sentinel/database/source_run_repo.py` to store fetch success ratios, bytes pulled, suppression hit count, and rolling stale timers per source. Emit the metrics from adapters via `sentinel/retrieval/fetcher.py`.
+   - Refresh the `sentinel sources health` CLI output to surface the stored metrics plus a derived health score (0-100). Tests in `tests/test_source_health.py` and `tests/test_source_health_integration.py` should pin the scoring math.
+   - *Exit criteria:* rerunning `sentinel run` twice with identical inputs produces deterministic SourceRun rows whose aggregates are rendered in the health table without recomputing from scratch.
+
+3. **Adapter diagnostics contract**
+   - Define the required diagnostics envelope (HTTP status, bytes pulled, dedupe count, suppression hits) in this doc and mirror it in `docs/ARCHITECTURE.md`. Implement the logging in `sentinel/retrieval/adapters.py` and persist via `sentinel/database/raw_item_repo.py`.
+   - Add pytest helpers so every adapter test asserts the diagnostics payload shape. Start with RSS + NWS fixtures in `tests/test_source_health*.py`.
+   - *Exit criteria:* failing to emit diagnostics fails CI with a clear assertion instead of silently degrading observability.
+
+4. **Suppression observability + CLI affordances**
+   - Have `sentinel/suppression/engine.py` emit structured reason codes for every suppression decision and persist them alongside SourceRuns so they trend with other health metrics.
+   - Document and ship `--explain-suppress` (already stubbed in the CLI help) so operators can inspect the raw events that were muted plus the rules responsible. Update CLI docs + README usage snippets.
+   - *Exit criteria:* `sentinel sources health --explain-suppress <source>` (or the ingest CLI flag) prints deterministic suppression samples with rule ids + counts, and the data feeds the health score calculations above.
+
+5. **Failure budget automation in doctor/run-status**
+   - Plumb the health score + suppression analytics into `sentinel doctor` and the run-status footer (`sentinel/ops/run_status.py`) so unhealthy sources can block downstream phases when strict mode is enabled.
+   - Encode the gating logic in `tests/test_source_health_integration.py` and `tests/test_run_status.py` by simulating degraded sources and asserting the correct exit codes + doctor recommendations.
+   - *Exit criteria:* CI (or a developer) running `sentinel doctor` immediately sees a blocking recommendation when the rolling failure budget is exhausted; strict-mode `sentinel run` exits with code 2 in the same scenario.
+
 ### P2 – Decision Core & Artifact Quality
 
 - **Canonicalization v2**: consolidate normalization and entity extraction into
