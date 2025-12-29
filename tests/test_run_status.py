@@ -1,5 +1,6 @@
 """Unit tests for run status evaluation (v1.0)."""
 
+import json
 import pytest
 from datetime import datetime, timezone
 
@@ -203,6 +204,32 @@ def test_warning_ingest_failure():
     assert any("failed" in msg.lower() and "ingest" in msg.lower() for msg in messages)
 
 
+def test_warning_ingest_errors_from_diagnostics():
+    """Diagnostics with ingest errors should surface as warnings."""
+    ingest_runs = [
+        SourceRun(
+            run_id="run1",
+            run_group_id="group1",
+            source_id="source1",
+            phase="INGEST",
+            run_at_utc=datetime.now(timezone.utc).isoformat(),
+            status="SUCCESS",
+            items_processed=3,
+            items_events_created=2,
+            items_alerts_touched=1,
+            diagnostics_json=json.dumps({"errors": 2}),
+        ),
+    ]
+    exit_code, messages = evaluate_run_status(
+        fetch_results=None,
+        ingest_runs=ingest_runs,
+        doctor_findings={"enabled_sources_count": 1},
+        stale_sources=None,
+    )
+    assert exit_code == 1
+    assert any("ingest errors" in msg.lower() for msg in messages)
+
+
 def test_healthy_all_good():
     """Test that healthy conditions result in exit code 0."""
     fetch_results = [
@@ -285,6 +312,33 @@ def test_strict_mode_warnings_become_broken():
     )
     assert exit_code == 2  # Warnings become broken in strict mode
     assert any("failed" in msg.lower() for msg in messages)
+
+
+def test_strict_mode_treats_ingest_errors_as_broken():
+    """In strict mode, ingest error warnings become broken."""
+    ingest_runs = [
+        SourceRun(
+            run_id="run1",
+            run_group_id="group1",
+            source_id="source1",
+            phase="INGEST",
+            run_at_utc=datetime.now(timezone.utc).isoformat(),
+            status="SUCCESS",
+            items_processed=3,
+            items_events_created=2,
+            items_alerts_touched=1,
+            diagnostics_json=json.dumps({"errors": 1}),
+        ),
+    ]
+    exit_code, messages = evaluate_run_status(
+        fetch_results=None,
+        ingest_runs=ingest_runs,
+        doctor_findings={"enabled_sources_count": 1},
+        stale_sources=None,
+        strict=True,
+    )
+    assert exit_code == 2
+    assert any("ingest errors" in msg.lower() for msg in messages)
 
 
 def test_failure_budget_blocker_breaks_run():

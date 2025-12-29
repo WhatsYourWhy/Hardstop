@@ -1,5 +1,6 @@
 """Run status evaluation for exit codes (v1.0)."""
 
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -88,6 +89,24 @@ def evaluate_run_status(
     
     # Check for WARNING conditions (exit code 1)
     warning_messages: List[str] = []
+    ingest_error_runs: List[SourceRun] = []
+    ingest_error_total = 0
+
+    def _get_ingest_error_count(run: SourceRun) -> int:
+        diagnostics_json = getattr(run, "diagnostics_json", None)
+        if not diagnostics_json:
+            return 0
+        try:
+            diagnostics = json.loads(diagnostics_json)
+        except (json.JSONDecodeError, TypeError):
+            return 0
+        errors = diagnostics.get("errors")
+        if errors is None:
+            return 0
+        try:
+            return int(errors)
+        except (TypeError, ValueError):
+            return 0
     
     # 1. Some enabled sources failed fetch
     if fetch_results:
@@ -104,6 +123,15 @@ def evaluate_run_status(
         failed_ingests = [r for r in ingest_runs if r.status == "FAILURE"]
         if failed_ingests:
             warning_messages.append(f"{len(failed_ingests)} source(s) failed during ingest")
+        for run in ingest_runs:
+            error_count = _get_ingest_error_count(run)
+            if error_count > 0:
+                ingest_error_runs.append(run)
+                ingest_error_total += error_count
+        if ingest_error_runs:
+            warning_messages.append(
+                f"{len(ingest_error_runs)} source(s) had ingest errors ({ingest_error_total} total)"
+            )
     
     # 4. Suppression config warnings (optional)
     if doctor_findings.get("suppression_warnings"):

@@ -1,5 +1,6 @@
 """Integration tests for source health tracking (v0.9)."""
 
+import json
 import pytest
 from datetime import datetime, timezone
 
@@ -282,14 +283,16 @@ def test_ingest_item_failure_creates_source_run(session, mocker):
     assert our_run is not None, f"No INGEST SourceRun found with run_group_id={run_group_id}"
     assert our_run.phase == "INGEST"
     assert our_run.run_group_id == run_group_id
-    # Status should be SUCCESS (batch completed, item failures are tracked in counters)
-    assert our_run.status == "SUCCESS"
+    diagnostics = json.loads(our_run.diagnostics_json or "{}")
+    # Status should be FAILURE when item errors occur by default
+    assert our_run.status == "FAILURE"
     # Counters: 2 items processed (attempted), at least 1 error
     assert our_run.items_processed == 2, f"Expected 2 items processed, got {our_run.items_processed}"
     # At least the valid item should create an event
     assert our_run.items_events_created >= 1, f"Expected at least 1 event created, got {our_run.items_events_created}"
-    # Item-level failures should not set error field for SUCCESS runs
-    assert our_run.error is None or our_run.error == "", "Item-level failures should not set error message"
+    # Item-level failures should surface via diagnostics
+    assert diagnostics.get("errors", 0) >= 1
+    assert our_run.error, "Item-level failures should populate error for failure status"
     
     # Assert: valid item was processed (event/alert created)
     # This verifies pipeline continues after item failure
@@ -495,8 +498,8 @@ def test_ingest_batch_failure_fail_fast_writes_source_run(session, mocker):
     assert our_run.duration_seconds >= 0
 
 
-def test_item_failure_normalize_contained_and_source_run_success(session, mocker):
-    """Test that item-level failure at normalize is contained and writes SUCCESS SourceRun."""
+def test_item_failure_normalize_marks_source_run_failure_by_default(session, mocker):
+    """Item-level failure at normalize marks SourceRun FAILURE when not explicitly allowed."""
     run_group_id = "test-group-item-failure-normalize"
     source_id = "test_source"
     now = datetime.now(timezone.utc).isoformat()
@@ -558,7 +561,7 @@ def test_item_failure_normalize_contained_and_source_run_success(session, mocker
     )
     session.commit()
     
-    # Assert: INGEST SourceRun was created with SUCCESS status (item failure contained)
+    # Assert: INGEST SourceRun was created with FAILURE status due to item errors
     runs = list_recent_runs(session, source_id=source_id, phase="INGEST")
     assert len(runs) >= 1, f"Expected at least 1 INGEST SourceRun, got {len(runs)}"
     
@@ -573,9 +576,12 @@ def test_item_failure_normalize_contained_and_source_run_success(session, mocker
     assert our_run.phase == "INGEST"
     assert our_run.run_group_id == run_group_id
     
-    # Item-level failure invariant: SUCCESS status, no error field, source_errors > 0
-    assert our_run.status == "SUCCESS", "Item-level failures should result in SUCCESS status"
-    assert our_run.error is None or our_run.error == "", "Item-level failures should not set error field (only batch failures do)"
+    diagnostics = json.loads(our_run.diagnostics_json or "{}")
+    
+    # Item-level failure should now fail the SourceRun unless explicitly allowed
+    assert our_run.status == "FAILURE", "Item-level failures should set FAILURE status by default"
+    assert our_run.error, "Item-level failures should set an error message"
+    assert diagnostics.get("errors", 0) >= 1
     assert our_run.items_processed >= 1, "At least one item should have been processed"
     assert our_run.items_events_created >= 1, "At least one event should have been created (the successful item)"
     
@@ -584,8 +590,8 @@ def test_item_failure_normalize_contained_and_source_run_success(session, mocker
     assert stats["processed"] >= 1, "Stats should reflect at least one processed item"
 
 
-def test_item_failure_save_event_contained_and_source_run_success(session, mocker):
-    """Test that item-level failure at save_event is contained and writes SUCCESS SourceRun."""
+def test_item_failure_save_event_can_be_allowed(session, mocker):
+    """Item-level save_event failure can be allowed to keep SourceRun SUCCESS."""
     run_group_id = "test-group-item-failure-save-event"
     source_id = "test_source"
     now = datetime.now(timezone.utc).isoformat()
@@ -638,16 +644,17 @@ def test_item_failure_save_event_contained_and_source_run_success(session, mocke
         side_effect=mock_save_event
     )
     
-    # Run ingest_external_main (fail_fast=False to allow batch to complete)
+    # Run ingest_external_main (fail_fast=False to allow batch to complete) with allow flag
     stats = ingest_external_main(
         session=session,
         source_id=source_id,
         run_group_id=run_group_id,
         fail_fast=False,
+        allow_ingest_errors=True,
     )
     session.commit()
     
-    # Assert: INGEST SourceRun was created with SUCCESS status (item failure contained)
+    # Assert: INGEST SourceRun was created with SUCCESS status when errors are allowed
     runs = list_recent_runs(session, source_id=source_id, phase="INGEST")
     assert len(runs) >= 1, f"Expected at least 1 INGEST SourceRun, got {len(runs)}"
     
@@ -662,9 +669,12 @@ def test_item_failure_save_event_contained_and_source_run_success(session, mocke
     assert our_run.phase == "INGEST"
     assert our_run.run_group_id == run_group_id
     
-    # Item-level failure invariant: SUCCESS status, no error field, source_errors > 0
-    assert our_run.status == "SUCCESS", "Item-level failures should result in SUCCESS status"
-    assert our_run.error is None or our_run.error == "", "Item-level failures should not set error field (only batch failures do)"
+    diagnostics = json.loads(our_run.diagnostics_json or "{}")
+    
+    # Item-level failure allowed: SourceRun remains SUCCESS but diagnostics capture errors
+    assert our_run.status == "SUCCESS", "Allow flag should keep SourceRun SUCCESS despite item failures"
+    assert our_run.error is None or our_run.error == "", "Allowing item failures should not set error field"
+    assert diagnostics.get("errors", 0) >= 1
     assert our_run.items_processed >= 1, "At least one item should have been processed"
     
     # Verify stats reflect the failure
@@ -1108,10 +1118,14 @@ def test_ingest_source_run_written_flag_resets_per_source(session, mocker):
     assert source1_run.run_group_id == run_group_id
     assert source2_run.run_group_id == run_group_id
     
-    # With item-level failure for source1, both should have SUCCESS status
-    # (source1 has source_errors > 0, but status is still SUCCESS because batch completed)
-    assert source1_run.status == "SUCCESS", "Item-level failure should result in SUCCESS status (batch completed)"
+    diagnostics_source1 = json.loads(source1_run.diagnostics_json or "{}")
+    diagnostics_source2 = json.loads(source2_run.diagnostics_json or "{}")
+    
+    # With item-level failure for source1, it should be marked as FAILURE by default
+    assert source1_run.status == "FAILURE", "Item-level failure should set FAILURE status by default"
+    assert diagnostics_source1.get("errors", 0) >= 1
     assert source2_run.status == "SUCCESS", "source2 should have SUCCESS status"
+    assert diagnostics_source2.get("errors", 0) == 0
     
     # Counters should be sane
     assert source1_run.items_processed >= 0
@@ -1120,4 +1134,3 @@ def test_ingest_source_run_written_flag_resets_per_source(session, mocker):
     assert source2_run.items_processed is not None
     
     # This proves the flag resets: both sources got SourceRuns despite source1's failure
-

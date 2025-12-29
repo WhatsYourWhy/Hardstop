@@ -603,6 +603,7 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
                 explain_suppress=getattr(args, 'explain_suppress', False),
                 run_group_id=run_group_id,
                 fail_fast=getattr(args, 'fail_fast', False),
+                allow_ingest_errors=getattr(args, 'allow_ingest_errors', False),
             )
             
             print(f"Ingestion complete:")
@@ -688,6 +689,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         explain_suppress=False,
         fail_fast=getattr(args, 'fail_fast', False),
         strict=strict_mode,
+        allow_ingest_errors=getattr(args, "allow_ingest_errors", False),
     )
     try:
         cmd_ingest_external(ingest_args, run_group_id=run_group_id)
@@ -1723,6 +1725,11 @@ def main() -> None:
         action="store_true",
         help="Stop processing on first source failure (v1.0)",
     )
+    ingest_external_parser.add_argument(
+        "--allow-ingest-errors",
+        action="store_true",
+        help="Allow item-level errors without failing the SourceRun (v1.3)",
+    )
     ingest_external_parser.set_defaults(func=cmd_ingest_external)
     
     # run command
@@ -1753,6 +1760,11 @@ def main() -> None:
         "--strict",
         action="store_true",
         help="Treat warnings as broken (exit code 2) (v1.0)",
+    )
+    run_parser.add_argument(
+        "--allow-ingest-errors",
+        action="store_true",
+        help="Allow item-level ingest errors without failing the run (v1.3)",
     )
     run_parser.set_defaults(func=cmd_run)
     

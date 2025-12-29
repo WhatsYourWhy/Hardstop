@@ -70,6 +70,7 @@ def main(
     explain_suppress: bool = False,
     run_group_id: Optional[str] = None,
     fail_fast: bool = False,
+    allow_ingest_errors: bool = False,
 ) -> Dict[str, int]:
     """
     Main ingestion runner for external raw items.
@@ -91,6 +92,8 @@ def main(
         explain_suppress: If True, log suppression decisions (v0.8)
         run_group_id: Optional UUID linking related runs (v0.9). If None, generates one.
         fail_fast: If True, stop processing on first source failure (v1.0)
+        allow_ingest_errors: If True, keep SourceRun SUCCESS status even when item-level
+            errors occur (v1.3)
         
     Returns:
         Dict with counts: {"processed": N, "events": M, "alerts": K, "errors": E, "suppressed": S}
@@ -354,7 +357,11 @@ def main(
                     if fail_fast:
                         ingest_status = "FAILURE"
                         duration_seconds = time.monotonic() - source_start_time
-                        _persist_source_run("FAILURE", source_error_msg, duration_seconds)
+                        diagnostics_payload = {
+                            "errors": source_errors,
+                            "suppression_reason_counts": dict(suppression_reason_counts),
+                        }
+                        _persist_source_run("FAILURE", source_error_msg, duration_seconds, diagnostics=diagnostics_payload)
                         raise
             
         except Exception as batch_error:
@@ -383,6 +390,11 @@ def main(
         if not source_run_written:
             # Calculate duration (only reached if no batch-level exception occurred)
             source_duration = time.monotonic() - source_start_time
+
+            if source_errors > 0 and not allow_ingest_errors:
+                ingest_status = "FAILURE"
+                if source_error_msg is None:
+                    source_error_msg = f"{source_errors} ingest error(s) during processing"
             
             # Create INGEST phase SourceRun record for this source (v0.9, v1.0: guaranteed)
             if ingest_status == "FAILURE":
@@ -409,4 +421,3 @@ def main(
     )
     
     return stats
-
