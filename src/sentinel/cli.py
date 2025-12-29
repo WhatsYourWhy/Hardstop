@@ -55,7 +55,7 @@ class StrictModeViolation(RuntimeError):
 
 def _canonical_hash(payload: Any) -> str:
     """Canonical SHA-256 over a JSON-serializable payload."""
-    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
@@ -569,9 +569,9 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                         diagnostics=diagnostics_payload,
                     )
                 
+                fetch_summary = _summarize_fetch_runs(session, run_group_id)
                 session.commit()
             
-            fetch_summary = _summarize_fetch_runs(session, run_group_id)
             raw_items_hash = _canonical_hash(fetch_summary["totals"])
             source_runs_hash = _canonical_hash(fetch_summary["runs"])
             print(f"Fetch complete: {total_fetched} items fetched, {total_stored} stored")
@@ -677,16 +677,14 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
                 print(f"  Suppressed: {stats['suppressed']}")
             print(f"  Errors: {stats['errors']}")
             
-            ingest_summary = _summarize_ingest_runs(session, run_group_id)
-
             if strict_mode:
                 if stats.get("errors", 0) > 0:
                     violation_msg = f"Strict mode aborted: ingest recorded {stats['errors']} error(s)"
-                    session.rollback()
                     errors.append(Diagnostic(code="STRICT_MODE_ABORT", message=violation_msg))
-                    ingest_summary = None
                     raise StrictModeViolation(violation_msg)
                 session.commit()
+            
+            ingest_summary = _summarize_ingest_runs(session, run_group_id)
         if ingest_summary:
             ingest_hash = _canonical_hash(ingest_summary)
             output_refs = [
