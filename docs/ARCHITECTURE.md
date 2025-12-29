@@ -122,6 +122,14 @@ Implementation note: `sentinel.ops.run_record` contains the canonical emitter. C
 - Use canonical JSON serialization (stable key ordering) and SHA-256 hashing with explicit schema/version identifiers.
 - Replay contract: a run is replayable if operator code version, input refs, config hash, and strict/best-effort metadata match. Replay must reproduce the exact output hashes.
 
+## Deterministic Kernel Contract
+
+- Every operator emits and finalizes a RunRecord (success or failure) via `sentinel.ops.run_record`, capturing mode metadata, resolved config fingerprint, and artifact refs. This is the enforcement spine for provenance and exit-code evaluation.
+- Config fingerprints hash the resolved merged snapshot (defaults applied, overrides folded in) using canonical serialization, so identical configs produce identical hashes across hosts.
+- Golden artifacts and fixtures hash only normalized payloads (timestamps, filesystem paths, or other nondeterministic fields are scrubbed) to prevent drift in determinism guards.
+- Strict vs best-effort exit codes, CLI footer messaging, and run-status diagnostics are regression-locked; rerunning in strict mode with identical inputs and resolved config reproduces the same RunRecord hashes and golden artifact digests.
+- Validation sources: `docs/specs/run-record.schema.json` defines the serialized contract, while `docs/EXECUTION_PLAN.md#P0-Verification` documents the pytest-backed enforcement that keeps these invariants true.
+
 ---
 
 ## Bounded Processing
