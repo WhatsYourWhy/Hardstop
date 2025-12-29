@@ -331,7 +331,12 @@ Contributions welcome! See the codebase for examples of:
 
 ## License
 
-[Add your license here]
+Sentinel is distributed under the [Sentinel Business License (SBL-1.0)](LICENSE).
+You may evaluate, research, or personally experiment with the code at no cost,
+but any production or revenue-generating use requires a commercial agreement
+with WhatsYourWhy, Inc. On January 1, 2029 this codebase is scheduled to
+dual-license under Apache 2.0. See [docs/LICENSING.md](docs/LICENSING.md) for
+the full licensing strategy and monetization recommendations.
 
 ## Changelog
 
