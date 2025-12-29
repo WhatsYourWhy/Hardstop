@@ -110,6 +110,35 @@ sentinel run --since 24h
 sentinel brief --today --since 24h
 ```
 
+### Demo Pipeline (P0 verification)
+
+Use the baked-in demo workflow when you need a deterministic sanity check of the network linker + alert builder stack.
+
+```bash
+# Install runtime + tests (once per environment)
+python3 -m pip install -e ".[dev]"
+
+# Load the golden-path network data into SQLite (idempotent)
+python3 -m sentinel.runners.load_network
+
+# Execute the end-to-end demo pipeline (reads event fixture, links network, builds alert)
+python3 -m sentinel.runners.run_demo
+```
+
+You should see a single alert emitted (currently `ALERT-20251229-bb25eb7a`) with:
+
+- classification `2` / impact score `5`
+- scope matching facility `PLANT-01`, lanes `LANE-001..003`, and six shipments
+- linking notes that walk through facility → lane → shipment matching and correlation key `SAFETY|PLANT-01|LANE-001`
+
+For a lighter-weight regression, you can run just the fixture-based unit test:
+
+```bash
+python3 -m pytest tests/test_demo_pipeline.py
+```
+
+Both commands are deterministic; if they diverge from the outputs above, capture the stdout and open an issue.
+
 ### Daily Workflow
 
 ```bash
