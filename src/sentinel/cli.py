@@ -8,7 +8,7 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Iterable, List, Optional
 
 import requests
 
@@ -33,6 +33,7 @@ from sentinel.database.schema import Alert, Event, RawItem, SourceRun
 from sentinel.database.source_run_repo import create_source_run, get_all_source_health, list_recent_runs
 from sentinel.database.sqlite_client import session_context
 from sentinel.output.daily_brief import generate_brief, render_json, render_markdown
+from sentinel.ops.artifacts import compute_raw_item_batch_digest, compute_source_runs_digest
 from sentinel.ops.run_record import (
     ArtifactRef,
     Diagnostic,
@@ -67,6 +68,33 @@ def _run_group_ref(run_group_id: str) -> ArtifactRef:
         hash=_hash_parts(run_group_id),
         kind="RunGroup",
     )
+
+
+def _log_run_record_failure(context: str, error: Exception) -> None:
+    logger.warning("Failed to emit %s run record: %s", context, error)
+    print(f"[sentinel] RunRecord emission failure ({context}): {error}", file=sys.stderr)
+
+
+def _safe_raw_batch_hash(sqlite_path: str, run_group_id: str, fallback_parts: Iterable[str]) -> str:
+    try:
+        return compute_raw_item_batch_digest(sqlite_path, run_group_id)
+    except Exception as exc:
+        logger.debug("Falling back to legacy raw batch hash: %s", exc, exc_info=True)
+        return _hash_parts(*fallback_parts)
+
+
+def _safe_source_runs_hash(
+    sqlite_path: str,
+    run_group_id: str,
+    *,
+    phase: str,
+    fallback_parts: Iterable[str],
+) -> str:
+    try:
+        return compute_source_runs_digest(sqlite_path, run_group_id, phase)
+    except Exception as exc:
+        logger.debug("Falling back to legacy source-runs hash: %s", exc, exc_info=True)
+        return _hash_parts(*fallback_parts)
 
 
 def cmd_demo(args: argparse.Namespace) -> None:
@@ -418,13 +446,19 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
             print(f"Would fetch from {len(filtered)} sources:")
             for source in filtered:
                 print(f"  - {source['id']} ({source.get('tier', 'unknown')} tier)")
+            raw_batch_hash = _hash_parts("dry-run", str(len(filtered)))
             source_runs_hash = _hash_parts(run_group_id, "dry-run", str(len(filtered)))
             output_refs = [
+                ArtifactRef(
+                    id=f"raw-items:{run_group_id}",
+                    hash=raw_batch_hash,
+                    kind="RawItemBatch",
+                ),
                 ArtifactRef(
                     id=f"source-runs:fetch:{run_group_id}",
                     hash=source_runs_hash,
                     kind="SourceRun",
-                )
+                ),
             ]
         else:
             results = fetcher.fetch_all(
@@ -504,21 +538,27 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                 session.commit()
             
             print(f"Fetch complete: {total_fetched} items fetched, {total_stored} stored")
-            batch_hash = _hash_parts(run_group_id, str(total_fetched), str(total_stored))
-            source_runs_hash = _hash_parts(
+            raw_batch_hash = _safe_raw_batch_hash(
+                sqlite_path,
                 run_group_id,
-                *(
-                    sorted(
-                        f"{result.source_id}:{result.status}:{result.status_code or 0}"
-                        for result in results
-                    )
-                    or ["none"]
-                ),
+                fallback_parts=(run_group_id, str(total_fetched), str(total_stored)),
+            )
+            source_runs_fallback = tuple(
+                sorted(
+                    f"{result.source_id}:{result.status}:{result.status_code or 0}"
+                    for result in results
+                )
+            ) or ("none",)
+            source_runs_hash = _safe_source_runs_hash(
+                sqlite_path,
+                run_group_id,
+                phase="FETCH",
+                fallback_parts=source_runs_fallback,
             )
             output_refs = [
                 ArtifactRef(
                     id=f"raw-items:{run_group_id}",
-                    hash=batch_hash,
+                    hash=raw_batch_hash,
                     kind="RawItemBatch",
                 ),
                 ArtifactRef(
@@ -548,7 +588,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                 best_effort=best_effort_metadata,
             )
         except Exception as record_error:
-            logger.warning("Failed to emit fetch run record: %s", record_error)
+            _log_run_record_failure("fetch", record_error)
 
 
 def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = None) -> None:
@@ -564,11 +604,16 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
     # Generate run_group_id if not provided
     if run_group_id is None:
         run_group_id = str(uuid.uuid4())
+    raw_batch_hash = _safe_raw_batch_hash(
+        sqlite_path,
+        run_group_id,
+        fallback_parts=(run_group_id, str(args.source_id or "all"), str(args.limit or "all")),
+    )
     input_refs: List[ArtifactRef] = [
         _run_group_ref(run_group_id),
         ArtifactRef(
             id=f"raw-items:{run_group_id}",
-            hash=_hash_parts(run_group_id, str(args.source_id or "all"), str(args.limit or "all")),
+            hash=raw_batch_hash,
             kind="RawItemBatch",
         ),
     ]
@@ -614,12 +659,17 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
             if stats.get('suppressed', 0) > 0:
                 print(f"  Suppressed: {stats['suppressed']}")
             print(f"  Errors: {stats['errors']}")
-        ingest_hash = _hash_parts(
+        ingest_hash = _safe_source_runs_hash(
+            sqlite_path,
             run_group_id,
-            str(stats.get("processed", 0)),
-            str(stats.get("events", 0)),
-            str(stats.get("alerts", 0)),
-            str(stats.get("errors", 0)),
+            phase="INGEST",
+            fallback_parts=(
+                run_group_id,
+                str(stats.get("processed", 0)),
+                str(stats.get("events", 0)),
+                str(stats.get("alerts", 0)),
+                str(stats.get("errors", 0)),
+            ),
         )
         output_refs = [
             ArtifactRef(
@@ -646,7 +696,7 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
                 errors=errors,
             )
         except Exception as record_error:
-            logger.warning("Failed to emit ingest run record: %s", record_error)
+            _log_run_record_failure("ingest", record_error)
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -916,7 +966,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             errors=diagnostics if exit_code == 2 else [],
         )
     except Exception as record_error:
-        logger.warning("Failed to emit run record: %s", record_error)
+        _log_run_record_failure("run-status", record_error)
     
     # Exit with code
     sys.exit(exit_code)
@@ -1518,14 +1568,7 @@ def cmd_brief(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
     output_refs: List[ArtifactRef] = []
     if run_group_id is None:
         run_group_id = getattr(args, "run_group_id", None) or str(uuid.uuid4())
-    input_refs: List[ArtifactRef] = [
-        _run_group_ref(run_group_id),
-        ArtifactRef(
-            id=f"source-runs:ingest:{run_group_id}",
-            hash=_hash_parts(run_group_id),
-            kind="SourceRun",
-        ),
-    ]
+    input_refs: List[ArtifactRef] = [_run_group_ref(run_group_id)]
     rendered_output = ""
     output_format = args.format or "md"
     
@@ -1545,6 +1588,20 @@ def cmd_brief(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
         # Get database path
         config = load_config()
         sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+        ingest_ref = ArtifactRef(
+            id=f"source-runs:ingest:{run_group_id}",
+            hash=_safe_source_runs_hash(
+                sqlite_path,
+                run_group_id,
+                phase="INGEST",
+                fallback_parts=(run_group_id,),
+            ),
+            kind="SourceRun",
+        )
+        if len(input_refs) == 1:
+            input_refs.append(ingest_ref)
+        else:
+            input_refs[1] = ingest_ref
         
         # Ensure migrations
         ensure_alert_correlation_columns(sqlite_path)
@@ -1573,10 +1630,11 @@ def cmd_brief(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
         else:
             rendered_output = render_markdown(brief_data)
         print(rendered_output)
+        brief_hash = hashlib.sha256(rendered_output.encode("utf-8")).hexdigest()
         output_refs = [
             ArtifactRef(
                 id=f"brief:{run_group_id}",
-                hash=_hash_parts(rendered_output, run_group_id, output_format),
+                hash=brief_hash,
                 kind="Brief",
                 bytes=len(rendered_output.encode("utf-8")),
                 schema=f"brief::{output_format}",
@@ -1599,7 +1657,7 @@ def cmd_brief(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                 errors=errors,
             )
         except Exception as record_error:
-            logger.warning("Failed to emit brief run record: %s", record_error)
+            _log_run_record_failure("brief", record_error)
 
 
 def main() -> None:

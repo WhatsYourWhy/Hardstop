@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 from contextlib import contextmanager
 from pathlib import Path
@@ -228,6 +229,8 @@ def test_cmd_brief_emits_run_record_success(monkeypatch, tmp_path):
     assert data["operator_id"] == "sentinel.brief@1.0.0"
     assert not data["errors"]
     assert any(ref["kind"] == "Brief" for ref in data["output_refs"])
+    expected_hash = hashlib.sha256("brief-md".encode("utf-8")).hexdigest()
+    assert any(ref["hash"] == expected_hash for ref in data["output_refs"])
 
 
 def test_cmd_brief_emits_run_record_on_failure(monkeypatch, tmp_path):
