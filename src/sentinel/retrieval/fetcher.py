@@ -3,7 +3,7 @@
 import random
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 import requests
@@ -32,7 +32,13 @@ class FetchResult(BaseModel):
 class SourceFetcher:
     """Fetches items from configured sources with rate limiting."""
     
-    def __init__(self, sources_config: Optional[Dict] = None):
+    def __init__(
+        self,
+        sources_config: Optional[Dict] = None,
+        *,
+        strict: bool = False,
+        rng_seed: Optional[int] = None,
+    ):
         """
         Initialize fetcher.
         
@@ -46,7 +52,12 @@ class SourceFetcher:
         self.defaults = sources_config.get("defaults", {})
         self.rate_limit_config = self.defaults.get("rate_limit", {})
         self.per_host_min_seconds = self.rate_limit_config.get("per_host_min_seconds", 2)
-        self.jitter_seconds = self.rate_limit_config.get("jitter_seconds", 1)
+        configured_jitter = self.rate_limit_config.get("jitter_seconds", 1)
+        self.strict = strict
+        self.jitter_seconds = 0 if strict else configured_jitter
+        self.random_seed = rng_seed if rng_seed is not None else (0 if strict else random.randint(0, 2**32 - 1))
+        self._rng = random.Random(self.random_seed)
+        self._adapter_versions: Set[str] = set()
         
         # Track last fetch time per host
         self._last_fetch_time: Dict[str, float] = {}
@@ -66,13 +77,24 @@ class SourceFetcher:
         
         if elapsed < min_interval:
             wait_time = min_interval - elapsed
-            # Add jitter
-            jitter = random.uniform(0, self.jitter_seconds)
+            jitter = self._rng.uniform(0, self.jitter_seconds) if self.jitter_seconds > 0 else 0
             total_wait = wait_time + jitter
             logger.debug(f"Rate limiting: waiting {total_wait:.2f}s for host {host}")
             time.sleep(total_wait)
         
         self._last_fetch_time[host] = time.time()
+
+    def best_effort_metadata(self) -> Dict:
+        """Return best-effort metadata for RunRecord compatibility."""
+        if self.strict:
+            return {}
+        jitter_note = "jitter_disabled" if self.jitter_seconds <= 0 else f"jitter_seconds={self.jitter_seconds}"
+        inputs_version = ",".join(sorted(self._adapter_versions)) if self._adapter_versions else "adapters:unknown"
+        return {
+            "seed": int(self.random_seed),
+            "inputs_version": inputs_version,
+            "notes": jitter_note,
+        }
     
     def _parse_since(self, since_str: str) -> Optional[int]:
         """
@@ -161,7 +183,8 @@ class SourceFetcher:
                 self._wait_for_rate_limit(source_url)
                 
                 # Create adapter
-                adapter = create_adapter(source, self.defaults)
+                adapter = create_adapter(source, self.defaults, random_seed=self.random_seed)
+                self._adapter_versions.add(f"{source_id}:{getattr(adapter, 'adapter_version', 'unknown')}")
                 
                 # Override max_items if specified
                 if max_items_per_source:
@@ -291,7 +314,8 @@ class SourceFetcher:
             self._wait_for_rate_limit(source_url)
             
             # Create adapter
-            adapter = create_adapter(source, self.defaults)
+            adapter = create_adapter(source, self.defaults, random_seed=self.random_seed)
+            self._adapter_versions.add(f"{source_id}:{getattr(adapter, 'adapter_version', 'unknown')}")
             
             # Override max_items if specified
             if max_items:

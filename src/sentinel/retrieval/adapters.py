@@ -32,7 +32,7 @@ class AdapterFetchResponse(BaseModel):
 class SourceAdapter(ABC):
     """Abstract base class for source adapters."""
     
-    def __init__(self, source_config: Dict, defaults: Dict):
+    def __init__(self, source_config: Dict, defaults: Dict, random_seed: Optional[int] = None):
         self.source_config = source_config
         self.defaults = defaults
         self.source_id = source_config["id"]
@@ -40,6 +40,8 @@ class SourceAdapter(ABC):
         self.timeout = defaults.get("timeout_seconds", 20)
         self.user_agent = defaults.get("user_agent", "sentinel-agent/0.6")
         self.max_items = source_config.get("max_items_per_fetch") or defaults.get("max_items_per_fetch", 50)
+        self.random_seed = random_seed
+        self.adapter_version = source_config.get("adapter_version", "1.0")
     
     @abstractmethod
     def fetch(self, since_hours: Optional[int] = None) -> AdapterFetchResponse:
@@ -372,7 +374,7 @@ class FEMAAdapter(SourceAdapter):
         return candidates
 
 
-def create_adapter(source_config: Dict, defaults: Dict) -> SourceAdapter:
+def create_adapter(source_config: Dict, defaults: Dict, *, random_seed: Optional[int] = None) -> SourceAdapter:
     """
     Factory function to create appropriate adapter based on source type.
     
@@ -386,11 +388,10 @@ def create_adapter(source_config: Dict, defaults: Dict) -> SourceAdapter:
     source_type = source_config.get("type", "rss")
     
     if source_type == "rss" or source_type == "atom":
-        return RSSAdapter(source_config, defaults)
+        return RSSAdapter(source_config, defaults, random_seed=random_seed)
     elif source_type == "nws_alerts":
-        return NWSAlertsAdapter(source_config, defaults)
+        return NWSAlertsAdapter(source_config, defaults, random_seed=random_seed)
     elif source_type == "fema" or source_type == "ipaws":
-        return FEMAAdapter(source_config, defaults)
+        return FEMAAdapter(source_config, defaults, random_seed=random_seed)
     else:
         raise ValueError(f"Unknown source type: {source_type}")
-

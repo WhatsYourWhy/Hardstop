@@ -54,6 +54,12 @@ def _hash_parts(*parts: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _derive_seed(label: str) -> int:
+    """Derive a deterministic seed from a stable label (e.g., run_group_id)."""
+    digest = hashlib.sha256(label.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16)
+
+
 def _run_group_ref(run_group_id: str) -> ArtifactRef:
     return ArtifactRef(
         id=f"run-group:{run_group_id}",
@@ -350,6 +356,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
     mode = "strict" if getattr(args, "strict", False) else "best-effort"
     output_refs: List[ArtifactRef] = []
     errors: List[Diagnostic] = []
+    best_effort_metadata: dict = {}
     
     # Generate run_group_id if not provided
     if run_group_id is None:
@@ -378,7 +385,8 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
     ensure_source_runs_table(sqlite_path)  # v0.9: source runs table
     
     # Create fetcher
-    fetcher = SourceFetcher()
+    rng_seed = _derive_seed(run_group_id)
+    fetcher = SourceFetcher(strict=mode == "strict", rng_seed=rng_seed)
     
     # Parse since argument
     since_hours = None
@@ -518,6 +526,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                     kind="SourceRun",
                 ),
             ]
+            best_effort_metadata = fetcher.best_effort_metadata()
         
     except Exception as e:
         logger.error(f"Error fetching: {e}", exc_info=True)
@@ -525,6 +534,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
         raise
     finally:
         try:
+            best_effort_metadata = best_effort_metadata or fetcher.best_effort_metadata()
             emit_run_record(
                 operator_id="sentinel.fetch@1.0.0",
                 mode=mode,
@@ -534,6 +544,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                 input_refs=input_refs,
                 output_refs=output_refs,
                 errors=errors,
+                best_effort=best_effort_metadata,
             )
         except Exception as record_error:
             logger.warning("Failed to emit fetch run record: %s", record_error)

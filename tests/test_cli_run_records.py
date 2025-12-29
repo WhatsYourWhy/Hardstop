@@ -68,17 +68,27 @@ def test_cmd_fetch_emits_run_record_success(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli, "save_raw_item", _save_raw_item)
     monkeypatch.setattr(cli, "create_source_run", lambda *_, **__: None)
-    monkeypatch.setattr(cli, "SourceFetcher", lambda: SimpleNamespace(fetch_all=lambda **__: [
-        FetchResult(
-            source_id="source-1",
-            fetched_at_utc="2024-01-01T00:00:00Z",
-            status="SUCCESS",
-            status_code=200,
-            duration_seconds=0.1,
-            items=[],
-            bytes_downloaded=10,
-        )
-    ]))
+    class _StubFetcher:
+        def __init__(self, **_kwargs):
+            self._meta = {"seed": 7, "inputs_version": "stub@1", "notes": "jitter_seconds=0"}
+
+        def fetch_all(self, **_kwargs):
+            return [
+                FetchResult(
+                    source_id="source-1",
+                    fetched_at_utc="2024-01-01T00:00:00Z",
+                    status="SUCCESS",
+                    status_code=200,
+                    duration_seconds=0.1,
+                    items=[],
+                    bytes_downloaded=10,
+                )
+            ]
+
+        def best_effort_metadata(self):
+            return self._meta
+
+    monkeypatch.setattr(cli, "SourceFetcher", _StubFetcher)
 
     args = argparse.Namespace(
         tier=None,
@@ -96,6 +106,7 @@ def test_cmd_fetch_emits_run_record_success(monkeypatch, tmp_path):
     assert not data["errors"]
     assert any(ref["id"] == "run-group:group-fetch" for ref in data["input_refs"])
     assert any(ref["kind"] == "RawItemBatch" for ref in data["output_refs"])
+    assert data["best_effort"]["seed"] == 7
 
 
 def test_cmd_fetch_emits_run_record_on_failure(monkeypatch, tmp_path):
@@ -105,10 +116,16 @@ def test_cmd_fetch_emits_run_record_on_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "session_context", _fake_session_context)
 
     class _FailingFetcher:
+        def __init__(self, **_kwargs):
+            self._meta = {}
+
         def fetch_all(self, **_kwargs):
             raise RuntimeError("fetch boom")
 
-    monkeypatch.setattr(cli, "SourceFetcher", lambda: _FailingFetcher())
+        def best_effort_metadata(self):
+            return self._meta
+
+    monkeypatch.setattr(cli, "SourceFetcher", _FailingFetcher)
     monkeypatch.setattr(cli, "load_sources_config", lambda: {"sources": []})
     monkeypatch.setattr(cli, "get_all_sources", lambda _cfg: [])
 
