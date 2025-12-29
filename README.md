@@ -18,6 +18,15 @@ Sentinel solves the problem of information overload from multiple alert sources.
 - **Self-evaluating**: Exit codes and health checks tell you when something's wrong
 - **Production-shaped**: Built for reliability with source health tracking and guaranteed failure reporting (we attempt to write one INGEST SourceRun per source per run_group_id; if the DB commit fails, the run record may not persist)
 
+## Connect your tools
+
+Sentinel is designed to be local-first but still play nicely with your collaboration stack. Use the [integrations guide](docs/INTEGRATIONS.md) for:
+
+- Posting daily briefs to Slack or other chat tools
+- Pairing Sentinel runs with CI/CD in GitHub or GitLab
+- Allowing agents or automations to act on deterministic alerts
+- Mirroring high-impact alerts into Linear or other work trackers
+
 ## Status
 
 **v1.0** — Production-shaped for personal daily driver use
