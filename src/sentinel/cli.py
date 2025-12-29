@@ -48,6 +48,20 @@ from sentinel.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _hash_parts(*parts: str) -> str:
+    """Stable SHA-256 hash for artifact refs."""
+    payload = "||".join(parts).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _run_group_ref(run_group_id: str) -> ArtifactRef:
+    return ArtifactRef(
+        id=f"run-group:{run_group_id}",
+        hash=_hash_parts(run_group_id),
+        kind="RunGroup",
+    )
+
+
 def cmd_demo(args: argparse.Namespace) -> None:
     """Run the demo pipeline."""
     run_demo_main()
@@ -331,10 +345,26 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
     
     config = load_config()
     sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    config_snapshot = resolve_config_snapshot()
+    started_at = datetime.now(timezone.utc).isoformat()
+    mode = "strict" if getattr(args, "strict", False) else "best-effort"
+    output_refs: List[ArtifactRef] = []
+    errors: List[Diagnostic] = []
     
     # Generate run_group_id if not provided
     if run_group_id is None:
         run_group_id = str(uuid.uuid4())
+    input_refs: List[ArtifactRef] = [
+        _run_group_ref(run_group_id),
+        ArtifactRef(
+            id=f"fetch-window:{args.since or 'all'}",
+            hash=_hash_parts(str(args.since or "all")),
+            kind="FetchWindow",
+        ),
+    ]
+    results: List[FetchResult] = []
+    total_fetched = 0
+    total_stored = 0
     
     # Ensure base tables exist first (creates all tables from schema)
     from sentinel.database.sqlite_client import get_engine
@@ -359,123 +389,177 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
         elif since_str.endswith("d"):
             since_hours = int(since_str[:-1]) * 24
     
-    if args.dry_run:
-        print("DRY RUN: Would fetch from sources (no changes will be made)")
-        # Still load sources to show what would be fetched
-        sources_config = load_sources_config()
-        all_sources = get_all_sources(sources_config)
-        tier_filter = args.tier
-        enabled_only = args.enabled_only
-        
-        filtered = []
-        for source in all_sources:
-            if tier_filter and source.get("tier") != tier_filter:
-                continue
-            if enabled_only and not source.get("enabled", True):
-                continue
-            filtered.append(source)
-        
-        print(f"Would fetch from {len(filtered)} sources:")
-        for source in filtered:
-            print(f"  - {source['id']} ({source.get('tier', 'unknown')} tier)")
-        return
-    
-    # Fetch items
     try:
-        results = fetcher.fetch_all(
-            tier=args.tier,
-            enabled_only=args.enabled_only,
-            max_items_per_source=args.max_items_per_source,
-            since=args.since,
-            fail_fast=args.fail_fast,
-        )
-        
-        # Save to database
-        total_fetched = 0
-        total_stored = 0
-        
-        with session_context(sqlite_path) as session:
-            # Get source configs once
+        if args.dry_run:
+            print("DRY RUN: Would fetch from sources (no changes will be made)")
+            # Still load sources to show what would be fetched
             sources_config = load_sources_config()
-            all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
+            all_sources = get_all_sources(sources_config)
+            tier_filter = args.tier
+            enabled_only = args.enabled_only
             
-            for result in results:  # results is now List[FetchResult]
-                source_id = result.source_id
-                candidates = result.items
-                
-                # Get source config for tier and trust_tier
-                source_config_raw = all_sources.get(source_id, {})
-                source_config = get_source_with_defaults(source_config_raw, sources_config) if source_config_raw else {}
-                tier = source_config.get("tier", "unknown")
-                trust_tier = source_config.get("trust_tier", 2)
-                
-                # Track items actually inserted (new, not duplicates)
-                items_new = 0
-                
-                for candidate in candidates:
-                    try:
-                        candidate_dict = candidate.model_dump() if hasattr(candidate, "model_dump") else candidate
-                        
-                        # Check if item is new by checking if it's in session.new after save
-                        # We'll check the raw_id pattern or use a simpler approach: track count before/after
-                        raw_item = save_raw_item(
-                            session,
-                            source_id=source_id,
-                            tier=tier,
-                            candidate=candidate_dict,
-                            trust_tier=trust_tier,
-                        )
-                        
-                        # Check if this is a new item (was just added to session)
-                        # New items have status="NEW" and are in session.new
-                        if raw_item in session.new or raw_item.status == "NEW":
-                            items_new += 1
-                            total_stored += 1
-                    except Exception as e:
-                        logger.error(f"Failed to save raw item from {source_id}: {e}")
-                
-                total_fetched += len(candidates)
-                logger.info(f"Fetched {len(candidates)} items from {source_id}, {items_new} new")
-                
-                # Create FETCH phase SourceRun record
-                diagnostics_payload = {
-                    "bytes_downloaded": result.bytes_downloaded or 0,
-                    "dedupe_dropped": max(len(candidates) - items_new, 0),
-                    "items_seen": len(candidates),
-                }
-
-                create_source_run(
-                    session,
-                    run_group_id=run_group_id,
-                    source_id=source_id,
-                    phase="FETCH",
-                    run_at_utc=result.fetched_at_utc,
-                    status=result.status,
-                    status_code=result.status_code,
-                    error=result.error,
-                    duration_seconds=result.duration_seconds,
-                    items_fetched=len(candidates),
-                    items_new=items_new,
-                    diagnostics=diagnostics_payload,
+            filtered = []
+            for source in all_sources:
+                if tier_filter and source.get("tier") != tier_filter:
+                    continue
+                if enabled_only and not source.get("enabled", True):
+                    continue
+                filtered.append(source)
+            
+            print(f"Would fetch from {len(filtered)} sources:")
+            for source in filtered:
+                print(f"  - {source['id']} ({source.get('tier', 'unknown')} tier)")
+            source_runs_hash = _hash_parts(run_group_id, "dry-run", str(len(filtered)))
+            output_refs = [
+                ArtifactRef(
+                    id=f"source-runs:fetch:{run_group_id}",
+                    hash=source_runs_hash,
+                    kind="SourceRun",
                 )
+            ]
+        else:
+            results = fetcher.fetch_all(
+                tier=args.tier,
+                enabled_only=args.enabled_only,
+                max_items_per_source=args.max_items_per_source,
+                since=args.since,
+                fail_fast=args.fail_fast,
+            )
             
-            session.commit()
-        
-        print(f"Fetch complete: {total_fetched} items fetched, {total_stored} stored")
+            # Save to database
+            with session_context(sqlite_path) as session:
+                # Get source configs once
+                sources_config = load_sources_config()
+                all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
+                
+                for result in results:  # results is now List[FetchResult]
+                    source_id = result.source_id
+                    candidates = result.items
+                    
+                    # Get source config for tier and trust_tier
+                    source_config_raw = all_sources.get(source_id, {})
+                    source_config = get_source_with_defaults(source_config_raw, sources_config) if source_config_raw else {}
+                    tier = source_config.get("tier", "unknown")
+                    trust_tier = source_config.get("trust_tier", 2)
+                    
+                    # Track items actually inserted (new, not duplicates)
+                    items_new = 0
+                    
+                    for candidate in candidates:
+                        try:
+                            candidate_dict = candidate.model_dump() if hasattr(candidate, "model_dump") else candidate
+                            
+                            # Check if item is new by checking if it's in session.new after save
+                            # We'll check the raw_id pattern or use a simpler approach: track count before/after
+                            raw_item = save_raw_item(
+                                session,
+                                source_id=source_id,
+                                tier=tier,
+                                candidate=candidate_dict,
+                                trust_tier=trust_tier,
+                            )
+                            
+                            # Check if this is a new item (was just added to session)
+                            # New items have status="NEW" and are in session.new
+                            if raw_item in session.new or raw_item.status == "NEW":
+                                items_new += 1
+                                total_stored += 1
+                        except Exception as e:
+                            logger.error(f"Failed to save raw item from {source_id}: {e}")
+                    
+                    total_fetched += len(candidates)
+                    logger.info(f"Fetched {len(candidates)} items from {source_id}, {items_new} new")
+                    
+                    # Create FETCH phase SourceRun record
+                    diagnostics_payload = {
+                        "bytes_downloaded": result.bytes_downloaded or 0,
+                        "dedupe_dropped": max(len(candidates) - items_new, 0),
+                        "items_seen": len(candidates),
+                    }
+
+                    create_source_run(
+                        session,
+                        run_group_id=run_group_id,
+                        source_id=source_id,
+                        phase="FETCH",
+                        run_at_utc=result.fetched_at_utc,
+                        status=result.status,
+                        status_code=result.status_code,
+                        error=result.error,
+                        duration_seconds=result.duration_seconds,
+                        items_fetched=len(candidates),
+                        items_new=items_new,
+                        diagnostics=diagnostics_payload,
+                    )
+                
+                session.commit()
+            
+            print(f"Fetch complete: {total_fetched} items fetched, {total_stored} stored")
+            batch_hash = _hash_parts(run_group_id, str(total_fetched), str(total_stored))
+            source_runs_hash = _hash_parts(
+                run_group_id,
+                *(
+                    sorted(
+                        f"{result.source_id}:{result.status}:{result.status_code or 0}"
+                        for result in results
+                    )
+                    or ["none"]
+                ),
+            )
+            output_refs = [
+                ArtifactRef(
+                    id=f"raw-items:{run_group_id}",
+                    hash=batch_hash,
+                    kind="RawItemBatch",
+                ),
+                ArtifactRef(
+                    id=f"source-runs:fetch:{run_group_id}",
+                    hash=source_runs_hash,
+                    kind="SourceRun",
+                ),
+            ]
         
     except Exception as e:
         logger.error(f"Error fetching: {e}", exc_info=True)
+        errors.append(Diagnostic(code="FETCH_ERROR", message=str(e)))
         raise
+    finally:
+        try:
+            emit_run_record(
+                operator_id="sentinel.fetch@1.0.0",
+                mode=mode,
+                config_snapshot=config_snapshot,
+                started_at=started_at,
+                ended_at=datetime.now(timezone.utc).isoformat(),
+                input_refs=input_refs,
+                output_refs=output_refs,
+                errors=errors,
+            )
+        except Exception as record_error:
+            logger.warning("Failed to emit fetch run record: %s", record_error)
 
 
 def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = None) -> None:
     """Ingest external raw items into events and alerts."""
     config = load_config()
     sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+    config_snapshot = resolve_config_snapshot()
+    started_at = datetime.now(timezone.utc).isoformat()
+    mode = "strict" if getattr(args, "strict", False) else "best-effort"
+    errors: List[Diagnostic] = []
+    output_refs: List[ArtifactRef] = []
     
     # Generate run_group_id if not provided
     if run_group_id is None:
         run_group_id = str(uuid.uuid4())
+    input_refs: List[ArtifactRef] = [
+        _run_group_ref(run_group_id),
+        ArtifactRef(
+            id=f"raw-items:{run_group_id}",
+            hash=_hash_parts(run_group_id, str(args.source_id or "all"), str(args.limit or "all")),
+            kind="RawItemBatch",
+        ),
+    ]
     
     # Ensure migrations
     ensure_raw_items_table(sqlite_path)
@@ -517,10 +601,39 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
             if stats.get('suppressed', 0) > 0:
                 print(f"  Suppressed: {stats['suppressed']}")
             print(f"  Errors: {stats['errors']}")
+        ingest_hash = _hash_parts(
+            run_group_id,
+            str(stats.get("processed", 0)),
+            str(stats.get("events", 0)),
+            str(stats.get("alerts", 0)),
+            str(stats.get("errors", 0)),
+        )
+        output_refs = [
+            ArtifactRef(
+                id=f"source-runs:ingest:{run_group_id}",
+                hash=ingest_hash,
+                kind="SourceRun",
+            )
+        ]
     
     except Exception as e:
         logger.error(f"Error ingesting: {e}", exc_info=True)
+        errors.append(Diagnostic(code="INGEST_ERROR", message=str(e)))
         raise
+    finally:
+        try:
+            emit_run_record(
+                operator_id="sentinel.ingest@1.0.0",
+                mode=mode,
+                config_snapshot=config_snapshot,
+                started_at=started_at,
+                ended_at=datetime.now(timezone.utc).isoformat(),
+                input_refs=input_refs,
+                output_refs=output_refs,
+                errors=errors,
+            )
+        except Exception as record_error:
+            logger.warning("Failed to emit ingest run record: %s", record_error)
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -545,6 +658,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         since=since_str,
         dry_run=False,
         fail_fast=False,
+        strict=strict_mode,
     )
     try:
         cmd_fetch(fetch_args, run_group_id=run_group_id)
@@ -562,6 +676,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         no_suppress=getattr(args, 'no_suppress', False),
         explain_suppress=False,
         fail_fast=getattr(args, 'fail_fast', False),
+        strict=strict_mode,
     )
     try:
         cmd_ingest_external(ingest_args, run_group_id=run_group_id)
@@ -577,9 +692,10 @@ def cmd_run(args: argparse.Namespace) -> None:
         format="md",
         limit=20,
         include_class0=False,
+        strict=strict_mode,
     )
     try:
-        cmd_brief(brief_args)
+        cmd_brief(brief_args, run_group_id=run_group_id)
     except Exception as e:
         logger.error(f"Brief failed: {e}", exc_info=True)
     
@@ -1355,50 +1471,97 @@ def cmd_export(args: argparse.Namespace) -> None:
         raise
 
 
-def cmd_brief(args: argparse.Namespace) -> None:
+def cmd_brief(args: argparse.Namespace, run_group_id: Optional[str] = None) -> None:
     """Generate daily brief."""
-    if not args.today:
-        logger.error("--today flag is required")
-        return
-    
-    # Parse --since argument
-    since_str = args.since or "24h"
-    try:
-        since_hours = _parse_since(since_str)
-    except ValueError as e:
-        logger.error(str(e))
-        return
-    
-    # Get database path
-    config = load_config()
-    sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
-    
-    # Ensure migrations
-    ensure_alert_correlation_columns(sqlite_path)
-    ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
-    ensure_suppression_columns(sqlite_path)  # v0.8: suppression columns
-    
-    # Generate brief
-    try:
-        with session_context(sqlite_path) as session:
-            brief_data = generate_brief(
-                session,
-                since_hours=since_hours,
-                include_class0=args.include_class0,
-                limit=args.limit,
-            )
-    except Exception as e:
-        logger.error(f"Error generating brief: {e}")
-        print("Error: Could not generate brief. Ensure database exists and is accessible.")
-        print("Run `sentinel ingest` to create the database, then `sentinel demo` to generate alerts.")
-        return
-    
-    # Render output
+    config_snapshot = resolve_config_snapshot()
+    started_at = datetime.now(timezone.utc).isoformat()
+    mode = "strict" if getattr(args, "strict", False) else "best-effort"
+    errors: List[Diagnostic] = []
+    output_refs: List[ArtifactRef] = []
+    if run_group_id is None:
+        run_group_id = getattr(args, "run_group_id", None) or str(uuid.uuid4())
+    input_refs: List[ArtifactRef] = [
+        _run_group_ref(run_group_id),
+        ArtifactRef(
+            id=f"source-runs:ingest:{run_group_id}",
+            hash=_hash_parts(run_group_id),
+            kind="SourceRun",
+        ),
+    ]
+    rendered_output = ""
     output_format = args.format or "md"
-    if output_format == "json":
-        print(render_json(brief_data))
-    else:
-        print(render_markdown(brief_data))
+    
+    try:
+        if not args.today:
+            raise ValueError("--today flag is required")
+        
+        # Parse --since argument
+        since_str = args.since or "24h"
+        try:
+            since_hours = _parse_since(since_str)
+        except ValueError as e:
+            logger.error(str(e))
+            errors.append(Diagnostic(code="BRIEF_ERROR", message=str(e)))
+            raise
+        
+        # Get database path
+        config = load_config()
+        sqlite_path = config.get("storage", {}).get("sqlite_path", "sentinel.db")
+        
+        # Ensure migrations
+        ensure_alert_correlation_columns(sqlite_path)
+        ensure_trust_tier_columns(sqlite_path)  # v0.7: trust tier columns
+        ensure_suppression_columns(sqlite_path)  # v0.8: suppression columns
+        
+        # Generate brief
+        try:
+            with session_context(sqlite_path) as session:
+                brief_data = generate_brief(
+                    session,
+                    since_hours=since_hours,
+                    include_class0=args.include_class0,
+                    limit=args.limit,
+                )
+        except Exception as e:
+            logger.error(f"Error generating brief: {e}")
+            print("Error: Could not generate brief. Ensure database exists and is accessible.")
+            print("Run `sentinel ingest` to create the database, then `sentinel demo` to generate alerts.")
+            errors.append(Diagnostic(code="BRIEF_ERROR", message=str(e)))
+            raise
+        
+        # Render output
+        if output_format == "json":
+            rendered_output = render_json(brief_data)
+        else:
+            rendered_output = render_markdown(brief_data)
+        print(rendered_output)
+        output_refs = [
+            ArtifactRef(
+                id=f"brief:{run_group_id}",
+                hash=_hash_parts(rendered_output, run_group_id, output_format),
+                kind="Brief",
+                bytes=len(rendered_output.encode("utf-8")),
+                schema=f"brief::{output_format}",
+            )
+        ]
+    except Exception as exc:
+        if not errors:
+            errors.append(Diagnostic(code="BRIEF_ERROR", message=str(exc)))
+        raise
+    finally:
+        try:
+            emit_run_record(
+                operator_id="sentinel.brief@1.0.0",
+                mode=mode,
+                config_snapshot=config_snapshot,
+                started_at=started_at,
+                ended_at=datetime.now(timezone.utc).isoformat(),
+                input_refs=input_refs,
+                output_refs=output_refs,
+                errors=errors,
+            )
+        except Exception as record_error:
+            logger.warning("Failed to emit brief run record: %s", record_error)
 
 
 def main() -> None:

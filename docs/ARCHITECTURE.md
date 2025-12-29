@@ -113,6 +113,7 @@ A local persistent store (SQLite by default) supports:
 The RunRecord is the backbone for replay, audit, and billing-like accounting.
 
 Implementation note: `sentinel.ops.run_record` contains the canonical emitter. CLI surfaces such as `sentinel run` persist RunRecords under `run_records/`, ensuring every execution captures the config fingerprint and run-status diagnostics.
+Fetch (`sentinel fetch`), ingest (`sentinel ingest-external`), and brief (`sentinel brief`) now emit per-operator RunRecords keyed by a shared `run_group_id`, threading raw-item batches, `SourceRun` rows, and brief artifacts through explicit input/output refs for provenance.
 
 ---
 
@@ -271,4 +272,3 @@ Use this checklist when reviewing new changes or planning refactors:
 - **Offline Capable:** Default execution works without network beyond adapter calls; provide `--no-network`/local fixture modes for demos.
 
 When planning future work, map the feature to an operator tier, describe its inputs/outputs/config, and update this document plus related specs accordingly.
-
