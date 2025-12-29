@@ -273,17 +273,20 @@ Use `--strict` to treat warnings as broken (exit code 2).
 
 ## Architecture
 
-Sentinel follows a modular, local-first architecture:
+Sentinel Runtime is built around a deterministic loop: adapters ingest bounded sets of signals, operators transform them with explicit read/write contracts, and the runtime emits fingerprinted artifacts plus run records for replay. Design goals:
 
-1. **External Retrieval**: Fetch events from configured sources with rate limiting
-2. **Normalization**: Convert raw items into canonical event format
-3. **Suppression**: Filter noise using configurable rules
-4. **Entity Linking**: Link events to network entities (facilities, lanes, shipments)
-5. **Alert Generation**: Calculate risk scores and generate alerts
-6. **Correlation**: Deduplicate and update alerts based on correlation keys
-7. **Briefing**: Generate tier-aware summaries
+- **Deterministic by default**: Strict mode disallows nondeterministic dependencies and guarantees replayability.
+- **Explicit inputs/outputs**: Every operator declares the artifact types it touches and records those refs in a RunRecord.
+- **Local-first + bounded**: SQLite storage, capped windows, and adapter rate limits prevent “firehose” behavior.
+- **Auditable**: Artifacts, configuration hashes, and provenance are fingerprinted so the same inputs always yield the same outputs.
 
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed design documentation.
+Layers used in practice:
+
+1. **Ingestion Layer** – `sentinel/retrieval` adapters fetch and fingerprint signals.
+2. **Decision Core** – canonicalization, noise control, correlation, and scoring operators under `sentinel/parsing`, `sentinel/suppression`, and `sentinel/alerts`.
+3. **Artifact Layer** – SQLite repositories plus reporting (`sentinel/output`, `sentinel/api`) persist and render decision artifacts.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full runtime specification and operator taxonomy, and refer to [docs/specs/run-record.schema.json](docs/specs/run-record.schema.json) for the RunRecord contract used by every operator execution.
 
 ## Requirements
 

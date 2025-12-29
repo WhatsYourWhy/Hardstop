@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinel.local/docs/specs/run-record.schema.json",
+  "title": "Sentinel Run Record",
+  "description": "Provenance unit emitted by every Sentinel operator execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "operator_id",
+    "mode",
+    "started_at",
+    "ended_at",
+    "config_hash",
+    "input_refs",
+    "output_refs"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for this operator execution."
+    },
+    "operator_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_.-]+@[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Operator name and semantic version, e.g. correlation.window@1.2.0."
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "strict",
+        "best-effort"
+      ],
+      "description": "Execution mode; strict is the default."
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp captured before operator reads inputs."
+    },
+    "ended_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp captured after operator writes outputs."
+    },
+    "config_hash": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$",
+      "description": "SHA-256 of the fully-resolved operator configuration."
+    },
+    "input_refs": {
+      "type": "array",
+      "description": "Artifacts read by the operator, listed in read order.",
+      "items": {
+        "$ref": "#/$defs/artifactRef"
+      }
+    },
+    "output_refs": {
+      "type": "array",
+      "description": "Artifacts written by the operator.",
+      "items": {
+        "$ref": "#/$defs/artifactRef"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      },
+      "description": "Non-fatal issues encountered by the operator."
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      },
+      "description": "Errors raised during execution; presence usually implies retry."
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock duration."
+        },
+        "cpu_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Approximate CPU milliseconds consumed."
+        },
+        "memory_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Peak memory usage."
+        },
+        "bytes_in": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total bytes read from artifacts or adapters."
+        },
+        "bytes_out": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total bytes written to artifacts."
+        }
+      },
+      "description": "Resource accounting captured by the runtime."
+    },
+    "best_effort": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Metadata required to replay best-effort runs.",
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "description": "Deterministic seed used when randomness is allowed."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-form explanation of nondeterministic factors."
+        },
+        "inputs_version": {
+          "type": "string",
+          "description": "Hash or version string describing external models/resources."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "hash",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable identifier (UUID or composite natural key)."
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{64}$",
+          "description": "Canonical SHA-256 fingerprint."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Artifact type (Signal, SignalCanonical, Incident, DecisionArtifact, Brief, etc.)."
+        },
+        "schema": {
+          "type": "string",
+          "description": "Optional schema identifier / version for the artifact."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size of the artifact payload."
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Stable diagnostic code."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable context."
+        },
+        "details": {
+          "type": "object",
+          "description": "Structured metadata for the diagnostic."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "run_id": "a1d47476-d51e-4f34-9d5f-5fb3f5d861ce",
+      "operator_id": "correlation.window@1.2.0",
+      "mode": "strict",
+      "started_at": "2025-01-17T12:00:00Z",
+      "ended_at": "2025-01-17T12:00:03Z",
+      "config_hash": "6F5C3A0D4E5F8B7FCE8B92C7D3B6429980B6E8E976C2A5F93B9F3E17B4C58A41",
+      "input_refs": [
+        {
+          "id": "signal:abc123",
+          "hash": "15F0A2C9C628FA05DB540F7545E78CF636D3C6F7D16A6E0DBA08E9C1F8123456",
+          "kind": "SignalCanonical",
+          "schema": "signals/v1",
+          "bytes": 2048
+        }
+      ],
+      "output_refs": [
+        {
+          "id": "incident:xyz789",
+          "hash": "7C2B8F0A64E1B6D013BF51E3C8749B8815883F45B68F39AB7EDE5F63B912ABCD",
+          "kind": "Incident",
+          "schema": "incidents/v1",
+          "bytes": 1024
+        }
+      ],
+      "warnings": [],
+      "errors": [],
+      "cost": {
+        "duration_ms": 3150,
+        "cpu_ms": 2800,
+        "memory_bytes": 10485760,
+        "bytes_in": 4096,
+        "bytes_out": 2048
+      }
+    }
+  ]
+}
