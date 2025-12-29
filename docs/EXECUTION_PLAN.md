@@ -68,6 +68,14 @@ foundational dependencies to user-facing integrations.
   progressing to P1 workstreams.
 - Given identical inputs, resolved configs, and strict mode, rerunning `sentinel run`
   produces identical RunRecord hashes plus unchanged golden artifact digests.
+- Deterministic runs rely on caller-supplied IDs/timestamps (or replay-pinned values),
+  stable hashing of normalized inputs with canonical key ordering, and deterministic
+  ordering of diagnostics/messages prior to hashing/serialization. Operators that must
+  tolerate nondeterminism switch to best-effort, declare their entropy sources
+  (wall-clock reads, random jitter, network ordering), and record seeds/metadata under
+  `best_effort` so replays know which fields may drift. Strict mode scrubs or pins
+  nondeterministic fields when possible and will fail fast if an operator attempts to
+  emit untracked entropy.
 
 **P0 invariants**
 - Every operator emits/finalizes a RunRecord for each execution.

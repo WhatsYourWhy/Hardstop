@@ -130,6 +130,8 @@ Deterministic and replayed runs can provide fixed `run_id`, `started_at`, and `e
 - Config fingerprints hash the resolved merged snapshot (defaults applied, overrides folded in) using canonical serialization, so identical configs produce identical hashes across hosts.
 - Golden artifacts and fixtures hash only normalized payloads (timestamps, filesystem paths, or other nondeterministic fields are scrubbed) to prevent drift in determinism guards.
 - Strict vs best-effort exit codes, CLI footer messaging, and run-status diagnostics are regression-locked; rerunning in strict mode with identical inputs and resolved config reproduces the same RunRecord hashes and golden artifact digests.
+- Deterministic runs require caller-supplied identifiers and timestamps (or replay-pinned values) so that hashing inputs is stable. Operators hash normalized payloads with canonical key ordering; diagnostic and message streams are ordered deterministically before hashing/serialization.
+- Best-effort mode is the only place nondeterministic inputs are allowed (e.g., wall-clock, random jitter). Operators must capture seeds/metadata under `best_effort` and note which fields are nondeterministic; strict mode either rejects those fields or replaces them with pinned values during replays.
 - Validation sources: `docs/specs/run-record.schema.json` defines the serialized contract, while `docs/EXECUTION_PLAN.md#P0-Verification` documents the pytest-backed enforcement that keeps these invariants true.
 
 ---

@@ -20,7 +20,7 @@ Sentinel solves the problem of information overload from multiple alert sources.
 
 ### Core Guarantees
 
-- **Determinism & Auditability**: The P0 kernel is regression-locked so that identical inputs, resolved configs, and strict mode reruns produce identical RunRecord hashes and artifact digests. See `docs/EXECUTION_PLAN.md#P0-Verification` for the validation contract.
+- **Determinism & Auditability**: The P0 kernel is regression-locked so that identical inputs, resolved configs, and strict mode reruns produce identical RunRecord hashes and artifact digests. Deterministic runs rely on caller-supplied IDs/timestamps (or pinned values for replays), stable hashing of normalized inputs, and ordered diagnostics/messages. Best-effort runs must declare entropy (e.g., wall-clock reads, random jitter) and record seeds/metadata; strict mode scrubs or pins these fields and fails if untracked nondeterministic fields leak into hashes. See `docs/EXECUTION_PLAN.md#P0-Verification` for the validation contract.
 
 ## Connect your tools
 
