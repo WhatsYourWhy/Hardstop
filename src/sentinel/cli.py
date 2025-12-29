@@ -185,10 +185,10 @@ def cmd_sources_test(args: argparse.Namespace) -> None:
                 source_id=args.source_id,
                 since=args.since,
                 no_suppress=False,
-        explain_suppress=False,
-        fail_fast=getattr(args, 'fail_fast', False),
-    )
-    cmd_ingest_external(ingest_args, run_group_id=run_group_id)
+                explain_suppress=False,
+                fail_fast=getattr(args, 'fail_fast', False),
+            )
+            cmd_ingest_external(ingest_args, run_group_id=run_group_id)
     
     except ValueError as e:
         print(f"Error: {e}")
@@ -1615,4 +1615,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
