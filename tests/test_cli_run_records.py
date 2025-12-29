@@ -262,6 +262,7 @@ def test_cmd_ingest_strict_aborts_on_errors(monkeypatch, tmp_path):
     assert data["errors"]
     assert data["output_refs"] == []
 
+
 def test_cmd_brief_emits_run_record_success(monkeypatch, tmp_path):
     records_dir = _instrument_run_record(tmp_path, monkeypatch)
     _stub_config(monkeypatch, tmp_path)
