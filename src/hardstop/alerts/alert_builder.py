@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -93,11 +94,16 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Hardsto
     # Calculate classification based on network impact
     evidence = None
     if session:
-        impact_score, breakdown = calculate_network_impact_score(
+        scoring_now = event.get("scoring_now")
+        if not isinstance(scoring_now, datetime):
+            scoring_now = None
+
+        impact_score, breakdown, rationale = calculate_network_impact_score(
             event,
             session,
             trust_tier=trust_tier,
             weighting_bias=weighting_bias,
+            now=scoring_now,
         )
         classification = map_score_to_classification(impact_score)
         
@@ -117,6 +123,7 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Hardsto
             shipments_truncated=event.get("shipments_truncated", False),
             impact_score=impact_score,
             impact_score_breakdown=breakdown,
+            impact_score_rationale=rationale,
         )
         evidence = AlertEvidence(
             diagnostics=diagnostics,
@@ -294,4 +301,3 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Hardsto
         recommended_actions=recommended_actions,
         evidence=evidence,
     )
-

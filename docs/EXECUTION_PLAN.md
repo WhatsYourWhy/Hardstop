@@ -128,8 +128,9 @@ foundational dependencies to user-facing integrations.
   explicit operators with declared inputs/outputs. Ensure entity linking
   gracefully handles partial data.
 - **Impact scoring transparency**: document and persist rationale including
-  trust-tier modifiers, network criticality, and suppression context. Add tests
-  in `tests/test_impact_scorer.py`.
+  trust-tier modifiers, network criticality, and suppression context. Rationale
+  payloads are pinned in `tests/test_impact_scorer.py` and surfaced via
+  `AlertEvidence.diagnostics.impact_score_rationale` for deterministic replay.
 - **Correlation evidence graph**: expand incident correlation to store why
   events merged (temporal overlap, shared facilities) so analysts can audit.
 - **Incident replay CLI**: add `hardstop incidents replay <incident_id>` to

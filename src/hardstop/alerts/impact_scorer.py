@@ -136,7 +136,8 @@ def calculate_network_impact_score(
     session: Session,
     trust_tier: Optional[int] = None,
     weighting_bias: Optional[int] = None,
-) -> Tuple[int, list[str]]:
+    now: Optional[datetime] = None,
+) -> Tuple[int, list[str], Dict[str, object]]:
     """
     Calculate network impact score based on linked facilities, lanes, and shipments.
     
@@ -153,11 +154,36 @@ def calculate_network_impact_score(
         weighting_bias: Optional weighting bias (-2..+2). Default 0 if None.
     
     Returns:
-        Tuple of (impact_score, breakdown_list)
-        Breakdown shows each step in order for auditability
+        Tuple of (impact_score, breakdown_list, rationale_dict)
+        Breakdown shows each step in order for auditability; rationale_dict includes
+        structured, deterministic context for auditability.
     """
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
     score = 0
     breakdown = []
+    rationale: Dict[str, object] = {
+        "network_criticality": {
+            "facilities": [],
+            "lanes": [],
+            "priority_shipments": {
+                "count": 0,
+                "eta_within_48h": 0,
+                "ids_within_48h": [],
+            },
+            "shipment_count": len(event.get("shipments", [])),
+        },
+        "modifiers": {
+            "trust_tier": trust_tier if trust_tier is not None else 2,
+            "trust_tier_delta": 0,
+            "weighting_bias_delta": 0,
+        },
+        "suppression_context": {},
+        "score_trace": {},
+    }
     
     # Check facility criticality
     facility_ids = event.get("facilities", [])
@@ -169,6 +195,13 @@ def calculate_network_impact_score(
             if facility.criticality_score and facility.criticality_score >= 7:
                 score += 2
                 breakdown.append(f"+2: Facility criticality_score >= 7 ({facility.facility_id}={facility.criticality_score})")
+                rationale["network_criticality"]["facilities"] = [
+                    {
+                        "facility_id": facility.facility_id,
+                        "criticality_score": facility.criticality_score,
+                        "delta": 2,
+                    }
+                ]
                 break  # Only count once
     
     # Check lane volume
@@ -181,6 +214,13 @@ def calculate_network_impact_score(
             if lane.volume_score and lane.volume_score >= 7:
                 score += 1
                 breakdown.append(f"+1: Lane volume_score >= 7 ({lane.lane_id}={lane.volume_score})")
+                rationale["network_criticality"]["lanes"] = [
+                    {
+                        "lane_id": lane.lane_id,
+                        "volume_score": lane.volume_score,
+                        "delta": 1,
+                    }
+                ]
                 break  # Only count once
     
     # Check shipment priority (enhanced scoring)
@@ -196,6 +236,7 @@ def calculate_network_impact_score(
         if priority_count > 0:
             score += 1
             breakdown.append(f"+1: Priority shipments found ({priority_count} total)")
+            rationale["network_criticality"]["priority_shipments"]["count"] = priority_count
             
             # Additional points for multiple priority shipments
             if priority_count >= 5:
@@ -206,18 +247,24 @@ def calculate_network_impact_score(
             # Use robust parsing that handles timezone drift and bad dates
             near_term_count = 0
             for shipment in priority_shipments:
-                if is_eta_within_48h(shipment.eta_date):
+                if is_eta_within_48h(shipment.eta_date, now=now):
                     near_term_count += 1
+                    rationale["network_criticality"]["priority_shipments"]["ids_within_48h"].append(
+                        shipment.shipment_id
+                    )
+            rationale["network_criticality"]["priority_shipments"]["ids_within_48h"].sort()
             
             if near_term_count > 0:
                 score += 1
                 breakdown.append(f"+1: Priority shipment ETA within 48h ({near_term_count} shipments)")
+                rationale["network_criticality"]["priority_shipments"]["eta_within_48h"] = near_term_count
         
         # Check shipment count
         shipment_count = len(shipment_ids)
         if shipment_count >= 10:
             score += 1
             breakdown.append(f"+1: Shipment count >= 10 ({shipment_count})")
+            rationale["network_criticality"]["shipment_count"] = shipment_count
     
     # Check event type (check both event_type field and title/raw_text for keywords)
     event_type = event.get("event_type", "").upper()
@@ -235,6 +282,7 @@ def calculate_network_impact_score(
             score += total_weight
             matched_terms = ", ".join(entry["term"] for entry in keyword_matches)
             breakdown.append(f"+{total_weight}: High-impact keywords detected ({matched_terms})")
+            rationale["score_trace"]["keyword_terms"] = sorted(entry["term"] for entry in keyword_matches)
     
     if not breakdown:
         breakdown.append("No impact factors detected")
@@ -246,13 +294,17 @@ def calculate_network_impact_score(
     if trust_tier is None:
         trust_tier = 2  # Default
     
+    trust_tier_delta = 0
     if trust_tier == 3:
-        score += 1
+        trust_tier_delta = 1
+        score += trust_tier_delta
         breakdown.append("+1: Trust tier 3 bonus (official/government source)")
     elif trust_tier == 1:
-        score -= 1
+        trust_tier_delta = -1
+        score += trust_tier_delta
         breakdown.append("-1: Trust tier 1 penalty (lower trust source)")
     # trust_tier == 2: no change (default)
+    rationale["modifiers"]["trust_tier_delta"] = trust_tier_delta
     
     # Apply weighting bias
     if weighting_bias is None:
@@ -261,6 +313,7 @@ def calculate_network_impact_score(
     if weighting_bias != 0:
         score += weighting_bias
         breakdown.append(f"{'+' if weighting_bias > 0 else ''}{weighting_bias}: Weighting bias (manual adjustment)")
+        rationale["modifiers"]["weighting_bias_delta"] = weighting_bias
     
     # Cap final score at 0-10
     original_score = score
@@ -270,8 +323,22 @@ def calculate_network_impact_score(
             breakdown.append(f"Capped at 10 (was {original_score})")
         elif original_score < 0:
             breakdown.append(f"Capped at 0 (was {original_score})")
+
+    suppression_context = {
+        "status": event.get("suppression_status"),
+        "primary_rule_id": event.get("suppression_primary_rule_id"),
+        "rule_ids": sorted(event.get("suppression_rule_ids") or []),
+        "reason_code": event.get("suppression_reason_code"),
+    }
+    rationale["suppression_context"] = {
+        key: value
+        for key, value in suppression_context.items()
+        if value not in (None, [], "")
+    }
+    rationale["score_trace"]["base"] = base_score
+    rationale["score_trace"]["final"] = score
     
-    return score, breakdown
+    return score, breakdown, rationale
 
 
 def map_score_to_classification(impact_score: int) -> int:
@@ -288,4 +355,3 @@ def map_score_to_classification(impact_score: int) -> int:
         return 1
     else:
         return 0
-

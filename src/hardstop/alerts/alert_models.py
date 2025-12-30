@@ -35,6 +35,7 @@ class AlertDiagnostics(BaseModel):
     shipments_truncated: bool = False
     impact_score: int = 0
     impact_score_breakdown: list[str] = []
+    impact_score_rationale: dict[str, object] = {}
 
 
 class AlertEvidence(BaseModel):
@@ -107,4 +108,3 @@ class HardstopAlert(BaseModel):
         if self.evidence and self.evidence.diagnostics:
             return self.evidence.diagnostics
         return None
-

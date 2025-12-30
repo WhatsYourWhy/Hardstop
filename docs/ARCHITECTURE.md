@@ -171,6 +171,17 @@ Hardstop enforces bounded causal radius to avoid “firehose” behavior:
 When adding new modules, declare their taxonomy tier and the artifact types they read/write so operators remain composable.
 Canonicalization operator inputs/outputs and hashing rules are described in detail in [`docs/specs/canonicalization.md`](specs/canonicalization.md).
 
+### Impact scoring rationale payload (deterministic audit envelope)
+
+Impact scoring emits deterministic rationale alongside numeric scores under `AlertEvidence.diagnostics.impact_score_rationale`:
+
+- `network_criticality`: Facilities, lanes, and shipments that contributed to the base score. Includes the deltas applied, shipment counts, and near-term priority shipment IDs (sorted) so replayed runs reproduce the same rationale ordering.
+- `modifiers`: Trust-tier and weighting-bias deltas applied after the base score (`trust_tier_delta`, `weighting_bias_delta`, and the asserted `trust_tier`).
+- `suppression_context`: Stable suppression metadata copied from the event (`suppression_status`, `suppression_primary_rule_id`, `suppression_rule_ids` sorted deterministically, and `suppression_reason_code` when present).
+- `score_trace`: Base score before modifiers, final capped score, and any keyword terms that triggered scoring.
+
+The rationale payload is purely evidentiary; it does not change the decision surface but keeps score explainability stable across runs.
+
 ---
 
 ## Configuration Model

@@ -52,11 +52,12 @@ class TestCalculateNetworkImpactScore:
             "severity_guess": 0,  # Low input severity
         }
         
-        score, breakdown = calculate_network_impact_score(event, session)
+        score, breakdown, rationale = calculate_network_impact_score(event, session)
         
         # Should score based on facility criticality, not input severity
         assert score >= 2  # At least +2 for high criticality facility
         assert any("criticality_score" in b for b in breakdown)
+        assert rationale["network_criticality"]["facilities"][0]["facility_id"] == "PLANT-01"
     
     def test_facility_criticality_scoring(self):
         """Test facility criticality scoring with 1-10 scale."""
@@ -88,7 +89,7 @@ class TestCalculateNetworkImpactScore:
             "event_type": "GENERAL",
         }
         
-        score, breakdown = calculate_network_impact_score(event, session)
+        score, breakdown, rationale = calculate_network_impact_score(event, session)
         
         # High criticality should add +2
         assert score >= 2
@@ -103,8 +104,9 @@ class TestCalculateNetworkImpactScore:
             return Mock(filter=lambda **kw: Mock(all=lambda: []))
         
         session.query.side_effect = query_side_effect_low
-        score2, _ = calculate_network_impact_score(event, session)
+        score2, _, rationale2 = calculate_network_impact_score(event, session)
         assert score2 < score  # Lower score for low criticality
+        assert rationale2["network_criticality"]["facilities"] == []
     
     def test_lane_volume_scoring(self):
         """Test lane volume scoring with 1-10 scale."""
@@ -132,11 +134,12 @@ class TestCalculateNetworkImpactScore:
             "event_type": "GENERAL",
         }
         
-        score, breakdown = calculate_network_impact_score(event, session)
+        score, breakdown, rationale = calculate_network_impact_score(event, session)
         
         # High volume should add +1
         assert score >= 1
         assert any("volume_score" in b and ">= 7" in b for b in breakdown)
+        assert rationale["network_criticality"]["lanes"][0]["lane_id"] == "LANE-001"
     
     def test_shipment_priority_scoring(self):
         """Test enhanced shipment priority scoring."""
@@ -171,11 +174,13 @@ class TestCalculateNetworkImpactScore:
             "event_type": "GENERAL",
         }
         
-        score, breakdown = calculate_network_impact_score(event, session)
+        fixed_now = datetime(2024, 1, 10, 12, 0, 0, tzinfo=timezone.utc)
+        score, breakdown, rationale = calculate_network_impact_score(event, session, now=fixed_now)
         
         # Should have at least +1 for priority shipments
         assert score >= 1
         assert any("Priority shipments" in b for b in breakdown)
+        assert rationale["network_criticality"]["priority_shipments"]["count"] == 2
     
     def test_event_type_keyword_scoring(self):
         """Test event type and keyword detection."""
@@ -192,30 +197,31 @@ class TestCalculateNetworkImpactScore:
             "raw_text": "",
         }
         
-        score, breakdown = calculate_network_impact_score(event, session)
+        score, breakdown, rationale = calculate_network_impact_score(event, session)
         
         # Should detect "spill" keyword
         assert score >= 1
         assert any("keyword" in b.lower() or "spill" in b.lower() for b in breakdown)
+        assert "SPILL" in rationale["score_trace"]["keyword_terms"]
     
     def test_eta_within_48h_scoring(self):
         """Test ETA within 48h scoring with various date scenarios."""
         session = Mock()
         
         # Create priority shipments with different ETA scenarios
-        now = datetime.now(timezone.utc)
+        reference_date = date(2024, 1, 10)
         
-        # Shipment within 48h (tomorrow end-of-day)
+        # Shipment within 48h (tomorrow end-of-day relative to fixed_now)
         near_ship = Mock(spec=Shipment)
         near_ship.shipment_id = "SHP-NEAR"
         near_ship.priority_flag = 1
-        near_ship.eta_date = (now.date() + timedelta(days=1)).strftime("%Y-%m-%d")
+        near_ship.eta_date = (reference_date + timedelta(days=1)).strftime("%Y-%m-%d")
         
         # Shipment beyond 48h (3 days out)
         far_ship = Mock(spec=Shipment)
         far_ship.shipment_id = "SHP-FAR"
         far_ship.priority_flag = 1
-        far_ship.eta_date = (now.date() + timedelta(days=3)).strftime("%Y-%m-%d")
+        far_ship.eta_date = (reference_date + timedelta(days=3)).strftime("%Y-%m-%d")
         
         # Shipment with bad date
         bad_ship = Mock(spec=Shipment)
@@ -249,7 +255,8 @@ class TestCalculateNetworkImpactScore:
             "event_type": "GENERAL",
         }
         
-        score, breakdown = calculate_network_impact_score(event, session)
+        fixed_now = datetime(2024, 1, 10, 12, 0, 0, tzinfo=timezone.utc)
+        score, breakdown, rationale = calculate_network_impact_score(event, session, now=fixed_now)
         
         # Should have +1 for priority shipments
         assert score >= 1
@@ -304,7 +311,8 @@ class TestCalculateNetworkImpactScore:
         }
         
         # Should not crash, should just skip bad dates
-        score, breakdown = calculate_network_impact_score(event, session)
+        fixed_now = datetime(2024, 1, 10, 12, 0, 0, tzinfo=timezone.utc)
+        score, breakdown, rationale = calculate_network_impact_score(event, session, now=fixed_now)
         
         # Should still score for priority shipments
         assert score >= 1
@@ -312,6 +320,43 @@ class TestCalculateNetworkImpactScore:
         
         # Should not have 48h score since all dates are bad
         assert not any("within 48h" in b for b in breakdown)
+    
+    def test_rationale_tracks_modifiers_and_suppression(self):
+        """Rationale should pin modifiers and suppression context deterministically."""
+        session = Mock()
+        session.query.return_value.filter.return_value.all.return_value = []
+        
+        event = {
+            "facilities": [],
+            "lanes": [],
+            "shipments": [],
+            "event_type": "GENERAL",
+            "suppression_status": "SUPPRESSED",
+            "suppression_primary_rule_id": "rule-9",
+            "suppression_rule_ids": ["rule-2", "rule-9"],
+            "suppression_reason_code": "duplicate",
+        }
+        
+        fixed_now = datetime(2024, 1, 10, 12, 0, 0, tzinfo=timezone.utc)
+        score, breakdown, rationale = calculate_network_impact_score(
+            event,
+            session,
+            trust_tier=3,
+            weighting_bias=2,
+            now=fixed_now,
+        )
+        
+        assert rationale["modifiers"]["trust_tier"] == 3
+        assert rationale["modifiers"]["trust_tier_delta"] == 1
+        assert rationale["modifiers"]["weighting_bias_delta"] == 2
+        assert rationale["suppression_context"] == {
+            "status": "SUPPRESSED",
+            "primary_rule_id": "rule-9",
+            "rule_ids": ["rule-2", "rule-9"],
+            "reason_code": "duplicate",
+        }
+        assert rationale["score_trace"]["base"] == 0
+        assert rationale["score_trace"]["final"] == score
 
 
 class TestEtaParsing:
@@ -430,4 +475,3 @@ class TestEtaParsing:
         
         # Both should be True (tomorrow is within 48h from today)
         assert result_utc == result_est
-
