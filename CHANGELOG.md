@@ -25,6 +25,7 @@
 - `ingest_external` aggregates suppression reason counts per SourceRun
 - `evaluate_run_status` treats failure-budget blockers as exit code 2 and warnings in strict mode
 - Doctor command now reports failure-budget warnings/blockers alongside stale counts
+- `hardstop fetch` default `--max-items-per-source` is now 10 (was 50) to stay aligned with README
 
 ### Technical
 - New helper `hardstop.ops.source_health.compute_health_score`

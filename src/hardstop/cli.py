@@ -40,6 +40,7 @@ from hardstop.ops.run_record import (
     emit_run_record,
     resolve_config_snapshot,
 )
+from hardstop.ops.run_status import evaluate_run_status
 from hardstop.api.brief_api import _parse_since
 from hardstop.retrieval.fetcher import FetchResult, SourceFetcher
 from hardstop.runners.ingest_external import main as ingest_external_main
@@ -730,7 +731,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     fetch_args = argparse.Namespace(
         tier=None,
         enabled_only=True,
-        max_items_per_source=50,
+        max_items_per_source=10,
         since=since_str,
         dry_run=False,
         fail_fast=False,
@@ -1761,8 +1762,8 @@ def main() -> None:
     fetch_parser.add_argument(
         "--max-items-per-source",
         type=int,
-        default=50,
-        help="Maximum items per source (default: 50)",
+        default=10,
+        help="Maximum items per source (default: 10)",
     )
     fetch_parser.add_argument(
         "--since",
