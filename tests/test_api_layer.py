@@ -11,7 +11,7 @@ def test_api_layer_has_no_sqlalchemy_imports():
     Note: TYPE_CHECKING imports are allowed (e.g., `if TYPE_CHECKING: from ..database.schema import Alert`).
     These are only used for type hints and don't cause runtime SQLAlchemy imports.
     """
-    api_dir = Path("src/sentinel/api")
+    api_dir = Path("src/hardstop/api")
     
     # Files to check (exclude __init__.py and README.md)
     api_files = [
@@ -66,8 +66,8 @@ def test_api_layer_has_no_sqlalchemy_imports():
                     # Otherwise, it's a violation
                     violations.append(f"{api_file}: direct import from '{node.module}'")
                 
-                # Check for backdoor: from sentinel.database.schema (should only be in TYPE_CHECKING)
-                if node.module == "sentinel.database.schema":
+                # Check for backdoor: from hardstop.database.schema (should only be in TYPE_CHECKING)
+                if node.module == "hardstop.database.schema":
                     # Check if this import is inside a TYPE_CHECKING block by examining source context
                     lines = source.split("\n")
                     line_num = node.lineno - 1  # Convert to 0-based index
@@ -83,7 +83,7 @@ def test_api_layer_has_no_sqlalchemy_imports():
                                 break
                     
                     if not in_type_checking:
-                        violations.append(f"{api_file}:{node.lineno} imports from sentinel.database.schema outside TYPE_CHECKING block")
+                        violations.append(f"{api_file}:{node.lineno} imports from hardstop.database.schema outside TYPE_CHECKING block")
                 # Check imported names
                 if node.names:
                     for alias in node.names:

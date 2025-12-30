@@ -4,20 +4,20 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 
-from sentinel.database.raw_item_repo import (
+from hardstop.database.raw_item_repo import (
     mark_raw_item_suppressed,
     save_raw_item,
     summarize_suppression_reasons,
 )
-from sentinel.database.source_run_repo import (
+from hardstop.database.source_run_repo import (
     create_source_run,
     get_source_health,
     get_all_source_health,
     list_recent_runs,
 )
-from sentinel.database.schema import SourceRun
-from sentinel.retrieval.fetcher import FetchResult, SourceFetcher
-from sentinel.retrieval.adapters import AdapterFetchResponse, RawItemCandidate
+from hardstop.database.schema import SourceRun
+from hardstop.retrieval.fetcher import FetchResult, SourceFetcher
+from hardstop.retrieval.adapters import AdapterFetchResponse, RawItemCandidate
 
 
 def test_fetcher_captures_status_code_200(session):
@@ -25,13 +25,13 @@ def test_fetcher_captures_status_code_200(session):
     fetcher = SourceFetcher()
     
     # Mock a successful fetch
-    with patch('sentinel.retrieval.fetcher.create_adapter') as mock_adapter:
+    with patch('hardstop.retrieval.fetcher.create_adapter') as mock_adapter:
         mock_adapter_instance = Mock()
         mock_adapter_instance.fetch.return_value = AdapterFetchResponse(items=[])
         mock_adapter.return_value = mock_adapter_instance
         
         # Mock source config
-        with patch('sentinel.retrieval.fetcher.get_all_sources') as mock_get_sources:
+        with patch('hardstop.retrieval.fetcher.get_all_sources') as mock_get_sources:
             mock_get_sources.return_value = [{
                 "id": "test_source",
                 "type": "rss",
@@ -52,12 +52,12 @@ def test_fetcher_zero_items_is_success(session):
     """Test that zero items fetched = SUCCESS (quiet feeds are normal)."""
     fetcher = SourceFetcher()
     
-    with patch('sentinel.retrieval.fetcher.create_adapter') as mock_adapter:
+    with patch('hardstop.retrieval.fetcher.create_adapter') as mock_adapter:
         mock_adapter_instance = Mock()
         mock_adapter_instance.fetch.return_value = AdapterFetchResponse(items=[])  # Zero items
         mock_adapter.return_value = mock_adapter_instance
         
-        with patch('sentinel.retrieval.fetcher.get_all_sources') as mock_get_sources:
+        with patch('hardstop.retrieval.fetcher.get_all_sources') as mock_get_sources:
             mock_get_sources.return_value = [{
                 "id": "test_source",
                 "type": "rss",

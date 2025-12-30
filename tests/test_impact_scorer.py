@@ -4,13 +4,13 @@ import pytest
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import Mock
 
-from sentinel.alerts.impact_scorer import (
+from hardstop.alerts.impact_scorer import (
     calculate_network_impact_score,
     map_score_to_classification,
     parse_eta_date_safely,
     is_eta_within_48h,
 )
-from sentinel.database.schema import Facility, Lane, Shipment
+from hardstop.database.schema import Facility, Lane, Shipment
 
 
 class TestMapScoreToClassification:

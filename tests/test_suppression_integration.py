@@ -6,14 +6,14 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.orm import Session
 
-from sentinel.database.raw_item_repo import (
+from hardstop.database.raw_item_repo import (
     get_raw_items_for_ingest,
     mark_raw_item_suppressed,
     save_raw_item,
 )
-from sentinel.database.schema import Alert, Event, RawItem
-from sentinel.runners.ingest_external import main as ingest_external_main
-from sentinel.suppression.models import SuppressionRule
+from hardstop.database.schema import Alert, Event, RawItem
+from hardstop.runners.ingest_external import main as ingest_external_main
+from hardstop.suppression.models import SuppressionRule
 
 
 def test_suppressed_item_marked_in_raw_items(session: Session):

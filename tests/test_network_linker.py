@@ -4,9 +4,9 @@ import pytest
 from pathlib import Path
 from datetime import date, timedelta
 
-from sentinel.parsing.network_linker import link_event_to_network
-from sentinel.database.sqlite_client import get_session
-from sentinel.database.schema import Facility, Lane, Shipment
+from hardstop.parsing.network_linker import link_event_to_network
+from hardstop.database.sqlite_client import get_session
+from hardstop.database.schema import Facility, Lane, Shipment
 
 
 class TestAmbiguousCityState:

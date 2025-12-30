@@ -1,12 +1,12 @@
-# Sentinel Runtime Technical Architecture
+# Hardstop Runtime Technical Architecture
 
-Sentinel Runtime is a local-first deterministic decision engine. It ingests heterogeneous signals, normalizes and correlates them over time, evaluates them using explicit operators, and emits decision artifacts with provenance and fingerprints.
+Hardstop Runtime is a local-first deterministic decision engine. It ingests heterogeneous signals, normalizes and correlates them over time, evaluates them using explicit operators, and emits decision artifacts with provenance and fingerprints.
 
 ---
 
 ## Purpose
 
-Sentinel exists to make reliable, explainable decisions offline or in constrained environments. The runtime is designed for:
+Hardstop exists to make reliable, explainable decisions offline or in constrained environments. The runtime is designed for:
 
 - deterministic execution (by default)
 - explicit inputs/outputs (no hidden context)
@@ -21,7 +21,7 @@ Non-goals include conversational agent behavior, autonomous planning, self-modif
 
 ## System Overview
 
-Sentinel is structured around three layers:
+Hardstop is structured around three layers:
 
 1. **Ingestion Layer** — adapters fetch or receive signals from APIs, feeds, files, or streams.
 2. **Decision Core (Operators + Runtime)** — a deterministic pipeline of operators transforms signals into correlated incidents and decision artifacts.
@@ -112,8 +112,8 @@ A local persistent store (SQLite by default) supports:
 
 The RunRecord is the backbone for replay, audit, and billing-like accounting.
 
-Implementation note: `sentinel.ops.run_record` contains the canonical emitter. CLI surfaces such as `sentinel run` persist RunRecords under `run_records/`, ensuring every execution captures the config fingerprint and run-status diagnostics.
-Fetch (`sentinel fetch`), ingest (`sentinel ingest-external`), and brief (`sentinel brief`) now emit per-operator RunRecords keyed by a shared `run_group_id`, threading raw-item batches, `SourceRun` rows, and brief artifacts through explicit input/output refs for provenance.
+Implementation note: `hardstop.ops.run_record` contains the canonical emitter. CLI surfaces such as `hardstop run` persist RunRecords under `run_records/`, ensuring every execution captures the config fingerprint and run-status diagnostics.
+Fetch (`hardstop fetch`), ingest (`hardstop ingest-external`), and brief (`hardstop brief`) now emit per-operator RunRecords keyed by a shared `run_group_id`, threading raw-item batches, `SourceRun` rows, and brief artifacts through explicit input/output refs for provenance.
 Deterministic and replayed runs can provide fixed `run_id`, `started_at`, and `ended_at` values plus a `canonicalize_time` helper to normalize timestamps (e.g., round to whole seconds). File names can be pinned via `filename_basename` to avoid timestamp drift in golden fixtures. Best-effort (nondeterministic) runs must populate `best_effort` metadata to explain entropy sources and enable repeatability notes.
 
 ---
@@ -126,7 +126,7 @@ Deterministic and replayed runs can provide fixed `run_id`, `started_at`, and `e
 
 ## Deterministic Kernel Contract
 
-- Every operator emits and finalizes a RunRecord (success or failure) via `sentinel.ops.run_record`, capturing mode metadata, resolved config fingerprint, and artifact refs. This is the enforcement spine for provenance and exit-code evaluation.
+- Every operator emits and finalizes a RunRecord (success or failure) via `hardstop.ops.run_record`, capturing mode metadata, resolved config fingerprint, and artifact refs. This is the enforcement spine for provenance and exit-code evaluation.
 - Config fingerprints hash the resolved merged snapshot (defaults applied, overrides folded in) using canonical serialization, so identical configs produce identical hashes across hosts.
 - Golden artifacts and fixtures hash only normalized payloads (timestamps, filesystem paths, or other nondeterministic fields are scrubbed) to prevent drift in determinism guards.
 - Strict vs best-effort exit codes, CLI footer messaging, and run-status diagnostics are regression-locked; rerunning in strict mode with identical inputs and resolved config reproduces the same RunRecord hashes and golden artifact digests.
@@ -138,7 +138,7 @@ Deterministic and replayed runs can provide fixed `run_id`, `started_at`, and `e
 
 ## Bounded Processing
 
-Sentinel enforces bounded causal radius to avoid “firehose” behavior:
+Hardstop enforces bounded causal radius to avoid “firehose” behavior:
 
 - Adapters cap payload size, enforce paging/sampling, and respect `max_signals_per_cycle`.
 - Operators operate on explicit windows (time/count/bytes) and declare them.
@@ -156,17 +156,17 @@ Sentinel enforces bounded causal radius to avoid “firehose” behavior:
 5. **Evaluation Operators (Scoring/Decisions)** — apply deterministic scoring models, produce risk posture + rationale. Outputs: `DecisionArtifact`.
 6. **Reporting Operators** — render artifacts into Markdown/JSON briefs or export bundles. Outputs: `Brief`, export files. They never influence upstream decisions.
 
-### Mapping to Current Sentinel Modules
+### Mapping to Current Hardstop Modules
 
-| Taxonomy Layer | Sentinel Modules | Notes |
+| Taxonomy Layer | Hardstop Modules | Notes |
 | --- | --- | --- |
-| Ingestion Operators | `sentinel/retrieval/adapters.py`, `sentinel/retrieval/fetcher.py` | Adapters already limit rate and stamp `SourceRun` metrics. |
-| Canonicalization | `sentinel/parsing/normalizer.py`, `sentinel/parsing/entity_extractor.py` | Includes deterministic enrichment with network data. |
-| Noise Control | `sentinel/suppression/engine.py`, `sentinel/retrieval/dedupe.py` (implicit) | Suppression metadata is persisted for audits. |
-| Temporal Inference | `sentinel/alerts/correlation.py`, `sentinel/alerts/alert_builder.py` (incident grouping) | 7-day window + correlation key boundedness. |
-| Evaluation | `sentinel/alerts/impact_scorer.py`, `sentinel/alerts/alert_builder.py` | Strict heuristics with trust-tier modifiers and rationale fields. |
-| Reporting | `sentinel/output/daily_brief.py`, `sentinel/api/export.py` | Render-only; no decision authority. |
-| Artifact Layer | `sentinel/database/*`, `sentinel/ops/run_status.py` | SQLite store, migrations, run evaluation, provenance. |
+| Ingestion Operators | `hardstop/retrieval/adapters.py`, `hardstop/retrieval/fetcher.py` | Adapters already limit rate and stamp `SourceRun` metrics. |
+| Canonicalization | `hardstop/parsing/normalizer.py`, `hardstop/parsing/entity_extractor.py` | Includes deterministic enrichment with network data. |
+| Noise Control | `hardstop/suppression/engine.py`, `hardstop/retrieval/dedupe.py` (implicit) | Suppression metadata is persisted for audits. |
+| Temporal Inference | `hardstop/alerts/correlation.py`, `hardstop/alerts/alert_builder.py` (incident grouping) | 7-day window + correlation key boundedness. |
+| Evaluation | `hardstop/alerts/impact_scorer.py`, `hardstop/alerts/alert_builder.py` | Strict heuristics with trust-tier modifiers and rationale fields. |
+| Reporting | `hardstop/output/daily_brief.py`, `hardstop/api/export.py` | Render-only; no decision authority. |
+| Artifact Layer | `hardstop/database/*`, `hardstop/ops/run_status.py` | SQLite store, migrations, run evaluation, provenance. |
 
 When adding new modules, declare their taxonomy tier and the artifact types they read/write so operators remain composable.
 
@@ -239,7 +239,7 @@ to architectural dependencies:
   replayable.
 - **P1 – Source reliability & health**  
   Normalize source schemas, expose tier-aware health scores, surface suppression
-  analytics, and make `sentinel doctor` block downstream phases when sources are
+  analytics, and make `hardstop doctor` block downstream phases when sources are
   unhealthy.
 - **P2 – Decision core & artifact quality**  
   Refactor canonicalization, capture scoring rationale, persist correlation
@@ -267,9 +267,9 @@ must land in README, this document, and the execution plan simultaneously.
 
 Use this checklist when reviewing new changes or planning refactors:
 
-- **Determinism:** `sentinel/alerts/impact_scorer.py` and other evaluators avoid nondeterministic sources; if randomness is introduced, capture seeds in RunRecord metadata.
-- **Explicit I/O:** Repositories in `sentinel/database/` expose artifact-level APIs; operators should not reach directly into SQLite without declaring what they read/write.
-- **Replayability:** CLI commands pin their config via `config_hash` (see `sentinel/ops/run_status.py`). Ensure fixtures in `tests/` include expected hashes.
+- **Determinism:** `hardstop/alerts/impact_scorer.py` and other evaluators avoid nondeterministic sources; if randomness is introduced, capture seeds in RunRecord metadata.
+- **Explicit I/O:** Repositories in `hardstop/database/` expose artifact-level APIs; operators should not reach directly into SQLite without declaring what they read/write.
+- **Replayability:** CLI commands pin their config via `config_hash` (see `hardstop/ops/run_status.py`). Ensure fixtures in `tests/` include expected hashes.
 - **Provenance:** `source_run_repo.py` + future RunRecord schemas capture inputs/outputs and warnings/errors for each operator.
 - **Bounded Processing:** Retrieval adapters honor `--since`, `--max-items`, and per-source rate limits; correlation enforces 7-day windows; new operators must document their bounds.
 - **Offline Capable:** Default execution works without network beyond adapter calls; provide `--no-network`/local fixture modes for demos.

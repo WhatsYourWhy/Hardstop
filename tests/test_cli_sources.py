@@ -9,11 +9,11 @@ import importlib
 
 def test_sources_test_skips_ingest_when_flag_false(monkeypatch, tmp_path):
     """Ensure cmd_sources_test does not ingest unless explicitly requested."""
-    daily_brief = importlib.import_module("sentinel.output.daily_brief")
+    daily_brief = importlib.import_module("hardstop.output.daily_brief")
     if not hasattr(daily_brief, "_parse_since"):
         setattr(daily_brief, "_parse_since", lambda value: value)
 
-    cli = importlib.import_module("sentinel.cli")
+    cli = importlib.import_module("hardstop.cli")
 
     ingest_called = {"value": False}
 

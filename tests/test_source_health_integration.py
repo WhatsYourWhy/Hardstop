@@ -4,10 +4,10 @@ import json
 import pytest
 from datetime import datetime, timezone
 
-from sentinel.database.schema import SourceRun
-from sentinel.database.source_run_repo import create_source_run, list_recent_runs
-from sentinel.database.raw_item_repo import save_raw_item
-from sentinel.runners.ingest_external import main as ingest_external_main
+from hardstop.database.schema import SourceRun
+from hardstop.database.source_run_repo import create_source_run, list_recent_runs
+from hardstop.database.raw_item_repo import save_raw_item
+from hardstop.runners.ingest_external import main as ingest_external_main
 
 
 def test_fetch_creates_source_run(session):
@@ -252,11 +252,11 @@ def test_ingest_item_failure_creates_source_run(session, mocker):
         if call_count[0] == 2:  # Second call (invalid-item-1)
             raise ValueError("Simulated normalization error for testing")
         # Import here to avoid circular import
-        from sentinel.parsing.normalizer import normalize_external_event
+        from hardstop.parsing.normalizer import normalize_external_event
         return normalize_external_event(*args, **kwargs)
     
     mocker.patch(
-        "sentinel.runners.ingest_external.normalize_external_event",
+        "hardstop.runners.ingest_external.normalize_external_event",
         side_effect=mock_normalize
     )
     
@@ -331,11 +331,11 @@ def test_ingest_fail_fast_still_writes_source_run(session, mocker):
         if call_count[0] == 1:
             raise RuntimeError("Simulated batch-level failure for fail-fast test")
         # Import here to avoid circular import
-        from sentinel.database.event_repo import save_event
+        from hardstop.database.event_repo import save_event
         return save_event(*args, **kwargs)
     
     mocker.patch(
-        "sentinel.runners.ingest_external.save_event",
+        "hardstop.runners.ingest_external.save_event",
         side_effect=mock_save_event
     )
     
@@ -539,7 +539,7 @@ def test_item_failure_normalize_marks_source_run_failure_by_default(session, moc
     def mock_normalize(*args, **kwargs):
         nonlocal original_normalize
         if original_normalize is None:
-            from sentinel.parsing.normalizer import normalize_external_event
+            from hardstop.parsing.normalizer import normalize_external_event
             original_normalize = normalize_external_event
         call_count[0] += 1
         if call_count[0] == 1:  # First call raises
@@ -548,7 +548,7 @@ def test_item_failure_normalize_marks_source_run_failure_by_default(session, moc
         return original_normalize(*args, **kwargs)
     
     mocker.patch(
-        "sentinel.runners.ingest_external.normalize_external_event",
+        "hardstop.runners.ingest_external.normalize_external_event",
         side_effect=mock_normalize
     )
     
@@ -631,7 +631,7 @@ def test_item_failure_save_event_can_be_allowed(session, mocker):
     def mock_save_event(*args, **kwargs):
         nonlocal original_save_event
         if original_save_event is None:
-            from sentinel.database.event_repo import save_event
+            from hardstop.database.event_repo import save_event
             original_save_event = save_event
         call_count[0] += 1
         if call_count[0] == 1:  # First call raises
@@ -640,7 +640,7 @@ def test_item_failure_save_event_can_be_allowed(session, mocker):
         return original_save_event(*args, **kwargs)
     
     mocker.patch(
-        "sentinel.runners.ingest_external.save_event",
+        "hardstop.runners.ingest_external.save_event",
         side_effect=mock_save_event
     )
     
@@ -712,7 +712,7 @@ def test_ingest_commit_failure_after_source_run_creation(session, mocker):
     def mock_create_source_run(*args, **kwargs):
         nonlocal original_create_source_run
         if original_create_source_run is None:
-            from sentinel.database.source_run_repo import create_source_run
+            from hardstop.database.source_run_repo import create_source_run
             original_create_source_run = create_source_run
         # Track the call
         source_id_arg = kwargs.get("source_id")
@@ -734,13 +734,13 @@ def test_ingest_commit_failure_after_source_run_creation(session, mocker):
         return original_create_source_run(*args, **kwargs)
     
     mocker.patch(
-        "sentinel.runners.ingest_external.create_source_run",
+        "hardstop.runners.ingest_external.create_source_run",
         side_effect=mock_create_source_run
     )
     
     # Mock save_event to raise (triggers batch exception, reaches except block)
     mocker.patch(
-        "sentinel.runners.ingest_external.save_event",
+        "hardstop.runners.ingest_external.save_event",
         side_effect=RuntimeError("Simulated batch-level failure for commit test")
     )
     
@@ -817,7 +817,7 @@ def test_ingest_commit_failure_attempts_once_no_retry(session, mocker):
     def mock_create_source_run(*args, **kwargs):
         nonlocal original_create_source_run
         if original_create_source_run is None:
-            from sentinel.database.source_run_repo import create_source_run
+            from hardstop.database.source_run_repo import create_source_run
             original_create_source_run = create_source_run
         # Track the call, scoped by source_id and run_group_id
         source_id_arg = kwargs.get("source_id")
@@ -839,13 +839,13 @@ def test_ingest_commit_failure_attempts_once_no_retry(session, mocker):
         return original_create_source_run(*args, **kwargs)
     
     mocker.patch(
-        "sentinel.runners.ingest_external.create_source_run",
+        "hardstop.runners.ingest_external.create_source_run",
         side_effect=mock_create_source_run
     )
     
     # Mock save_event to raise (triggers batch exception, reaches except block)
     mocker.patch(
-        "sentinel.runners.ingest_external.save_event",
+        "hardstop.runners.ingest_external.save_event",
         side_effect=RuntimeError("Simulated batch-level failure for attempt-once test")
     )
     
@@ -913,7 +913,7 @@ def test_batch_failure_preflight_writes_source_run_failure_before_reraise(sessio
     
     # Mock preflight_source_batch to raise (triggers batch-level exception at outer try)
     mocker.patch(
-        "sentinel.runners.ingest_external.preflight_source_batch",
+        "hardstop.runners.ingest_external.preflight_source_batch",
         side_effect=RuntimeError("Simulated batch-level failure: preflight error")
     )
     
@@ -1073,7 +1073,7 @@ def test_ingest_source_run_written_flag_resets_per_source(session, mocker):
     def mock_normalize(*args, **kwargs):
         nonlocal original_normalize
         if original_normalize is None:
-            from sentinel.parsing.normalizer import normalize_external_event
+            from hardstop.parsing.normalizer import normalize_external_event
             original_normalize = normalize_external_event
         call_count[0] += 1
         # Check if this is for source1 (first source processed)
@@ -1084,7 +1084,7 @@ def test_ingest_source_run_written_flag_resets_per_source(session, mocker):
         return original_normalize(*args, **kwargs)
     
     mocker.patch(
-        "sentinel.runners.ingest_external.normalize_external_event",
+        "hardstop.runners.ingest_external.normalize_external_event",
         side_effect=mock_normalize
     )
     

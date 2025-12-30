@@ -4,9 +4,9 @@ import json
 import pytest
 from datetime import datetime, timezone
 
-from sentinel.database.schema import SourceRun
-from sentinel.ops.run_status import evaluate_run_status
-from sentinel.retrieval.fetcher import FetchResult, RawItemCandidate
+from hardstop.database.schema import SourceRun
+from hardstop.ops.run_status import evaluate_run_status
+from hardstop.retrieval.fetcher import FetchResult, RawItemCandidate
 
 
 def test_broken_config_error():

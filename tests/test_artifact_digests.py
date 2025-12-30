@@ -2,9 +2,9 @@ import json
 import uuid
 from pathlib import Path
 
-from sentinel.database.schema import SourceRun
-from sentinel.database.sqlite_client import session_context
-from sentinel.ops.artifacts import (
+from hardstop.database.schema import SourceRun
+from hardstop.database.sqlite_client import session_context
+from hardstop.ops.artifacts import (
     compute_raw_item_batch_digest,
     compute_source_runs_digest,
 )
@@ -52,7 +52,7 @@ def _insert_source_run(
 
 
 def test_source_runs_digest_ignores_run_group(tmp_path):
-    sqlite_path = tmp_path / "sentinel.db"
+    sqlite_path = tmp_path / "hardstop.db"
     for run_group in ("rg-a", "rg-b"):
         _insert_source_run(
             sqlite_path,
@@ -70,7 +70,7 @@ def test_source_runs_digest_ignores_run_group(tmp_path):
 
 
 def test_raw_item_batch_digest_tracks_fetch_counts(tmp_path):
-    sqlite_path = tmp_path / "sentinel.db"
+    sqlite_path = tmp_path / "hardstop.db"
     run_group = "rg-raw"
     _insert_source_run(
         sqlite_path,

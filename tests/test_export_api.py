@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from sentinel.api.brief_api import get_brief
-from sentinel.api.export import export_alerts, export_brief, export_sources
+from hardstop.api.brief_api import get_brief
+from hardstop.api.export import export_alerts, export_brief, export_sources
 
 
 def test_export_brief_matches_api_brief_invariants(session):
@@ -49,7 +49,7 @@ def test_export_brief_matches_api_brief_invariants(session):
 def test_export_alerts_csv_has_required_columns_and_row_count(session):
     """Test that export alerts CSV has required columns and correct row count."""
     # Get alerts from API
-    from sentinel.api.alerts_api import list_alerts
+    from hardstop.api.alerts_api import list_alerts
     
     alerts = list_alerts(session, since="24h", limit=50)
     
@@ -82,7 +82,7 @@ def test_export_alerts_csv_has_required_columns_and_row_count(session):
 
 def test_get_brief_is_stable_sort_order(session):
     """Test that get_brief returns alerts in stable sort order."""
-    from sentinel.database.alert_repo import upsert_new_alert_row
+    from hardstop.database.alert_repo import upsert_new_alert_row
     import json
     
     # Create alerts with known impact scores to test sorting behavior
@@ -176,8 +176,8 @@ def test_get_brief_is_stable_sort_order(session):
 
 def test_alert_reconstruction_round_trip(session):
     """Test that alert reconstruction from DB preserves all required fields."""
-    from sentinel.api.alerts_api import list_alerts
-    from sentinel.database.alert_repo import upsert_new_alert_row
+    from hardstop.api.alerts_api import list_alerts
+    from hardstop.database.alert_repo import upsert_new_alert_row
     import json
     
     # Create alert row via repo
@@ -253,15 +253,15 @@ def test_alert_reconstruction_round_trip(session):
     assert test_alert.evidence.diagnostics.impact_score == 8
     
     # Note: tier, trust_tier, source_id, update_count, first_seen_utc, last_seen_utc
-    # are stored in Alert ORM row but not yet in SentinelAlert model.
+    # are stored in Alert ORM row but not yet in HardstopAlert model.
     # They are accessible via get_alert_detail() which queries the row directly.
     # This test verifies the core reconstruction works.
 
 
 def test_alert_reconstruction_with_source_metadata(session):
     """Test that alert reconstruction preserves evidence.source, correlation_action, and scope_json metadata."""
-    from sentinel.api.alerts_api import list_alerts
-    from sentinel.database.alert_repo import upsert_new_alert_row
+    from hardstop.api.alerts_api import list_alerts
+    from hardstop.database.alert_repo import upsert_new_alert_row
     import json
     
     # Create alert with source metadata (tier/trust_tier/source_id)
@@ -332,7 +332,7 @@ def test_alert_reconstruction_with_source_metadata(session):
     assert test_alert.evidence.diagnostics is not None
     assert test_alert.evidence.diagnostics.impact_score == 9
     
-    # Note: evidence.source is not currently populated in _alert_row_to_sentinel_alert
+    # Note: evidence.source is not currently populated in _alert_row_to_hardstop_alert
     # This would require querying the Alert row for tier/source_id/trust_tier and adding to evidence.source
     # For now, we verify that the correlation_action and scope_json are preserved
 

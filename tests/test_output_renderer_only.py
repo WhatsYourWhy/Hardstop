@@ -12,7 +12,7 @@ def test_daily_brief_is_renderer_only():
     - Render the result (markdown/JSON)
     - Use Session type hints (for compatibility wrapper)
     """
-    daily_brief_file = Path("src/sentinel/output/daily_brief.py")
+    daily_brief_file = Path("src/hardstop/output/daily_brief.py")
     
     if not daily_brief_file.exists():
         return  # Skip if file doesn't exist
@@ -38,8 +38,8 @@ def test_daily_brief_is_renderer_only():
                         violations.append(f"Import from '{node.module}' (should use api layer)")
                 
                 # Check for SQLAlchemy schema imports
-                if node.module == "sentinel.database.schema":
-                    violations.append(f"Import from sentinel.database.schema (should use api layer)")
+                if node.module == "hardstop.database.schema":
+                    violations.append(f"Import from hardstop.database.schema (should use api layer)")
     
     # Check for direct DB access patterns in source
     lines = source.split("\n")

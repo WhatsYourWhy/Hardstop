@@ -1,28 +1,28 @@
-# Sentinel Licensing Strategy
+# Hardstop Licensing Strategy
 
 _Last updated: December 29, 2025_
 
 ## Goals
-- Preserve WhatsYourWhy's ability to monetize Sentinel through hosted services,
+- Preserve WhatsYourWhy's ability to monetize Hardstop through hosted services,
   support retainers, or commercial embeddings.
 - Keep the codebase inspectable and extensible for contributors.
-- Allow hobbyists, researchers, and prospects to evaluate Sentinel locally
+- Allow hobbyists, researchers, and prospects to evaluate Hardstop locally
   without negotiating upfront contracts.
 - Provide a clear, time-bound path toward a more permissive license to build
   community trust.
 
 ## License Selection
-Sentinel now ships under the **Sentinel Business License (SBL-1.0)**, a custom
+Hardstop now ships under the **Hardstop Business License (SBL-1.0)**, a custom
 license derived from permissive terms with explicit restrictions around
 Commercial Use. Key attributes:
 
 - **Non-commercial freedom:** Individuals and teams can clone, modify, and run
-  Sentinel indefinitely for evaluation, research, or personal workflows.
+  Hardstop indefinitely for evaluation, research, or personal workflows.
 - **Commercial gate:** Any production deployment that supports revenue,
   customer-facing services, or fee-based insights requires a commercial
   agreement with WhatsYourWhy, Inc.
 - **Small production trial allowance:** Up to three internal users may run
-  Sentinel in production solely to validate fit prior to signing a contract.
+  Hardstop in production solely to validate fit prior to signing a contract.
 - **Future open path:** On **January 1, 2029** this version of the codebase
   automatically becomes available under Apache 2.0, protecting long-term
   adopters and encouraging contributions.
@@ -35,8 +35,8 @@ Commercial Use. Key attributes:
      hosting, or agent-backed workflows.
    - Bundle priority support, roadmap influence, or private modules.
 
-2. **Hosted Sentinel (SaaS)**
-   - Operate a managed Sentinel environment under proprietary terms. The SBL
+2. **Hosted Hardstop (SaaS)**
+   - Operate a managed Hardstop environment under proprietary terms. The SBL
      ensures third parties cannot legally run a competing hosted service.
 
 3. **Premium Modules**
@@ -45,7 +45,7 @@ Commercial Use. Key attributes:
 
 4. **Partner Integrations**
    - Require OEM/partner agreements when logistics or risk platforms want to
-     embed Sentinel outputs into their products.
+     embed Hardstop outputs into their products.
 
 ## Compliance Guidance
 - Point all public references (README, marketing) to the SBL and contact

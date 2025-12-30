@@ -1,8 +1,8 @@
 import pytest
 
-import sentinel.retrieval.fetcher as fetcher_mod
-from sentinel.retrieval.adapters import AdapterFetchResponse
-from sentinel.retrieval.fetcher import SourceFetcher
+import hardstop.retrieval.fetcher as fetcher_mod
+from hardstop.retrieval.adapters import AdapterFetchResponse
+from hardstop.retrieval.fetcher import SourceFetcher
 
 
 def test_rate_limit_strict_disables_jitter(monkeypatch):

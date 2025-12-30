@@ -3,7 +3,7 @@ defaults:
   enabled: true
   max_items_per_fetch: 50
   timeout_seconds: 20
-  user_agent: "sentinel-agent/0.6.1 (WhatsYourWhy; contact: you@example.com)"
+  user_agent: "hardstop-agent/0.6.1 (WhatsYourWhy; contact: you@example.com)"
   rate_limit:
     per_host_min_seconds: 2
     jitter_seconds: 1

@@ -1,6 +1,6 @@
 """Tests for alert correlation functionality."""
 
-from sentinel.alerts.correlation import build_correlation_key
+from hardstop.alerts.correlation import build_correlation_key
 
 
 def test_build_correlation_key_stable():

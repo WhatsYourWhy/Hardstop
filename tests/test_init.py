@@ -1,10 +1,10 @@
-"""Integration tests for sentinel init command (v1.0)."""
+"""Integration tests for hardstop init command (v1.0)."""
 
 import pytest
 import shutil
 from pathlib import Path
 
-from sentinel.cli import cmd_init
+from hardstop.cli import cmd_init
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def example_files(config_dir):
 
 
 def test_init_creates_config_files(config_dir, example_files, monkeypatch):
-    """Test that sentinel init creates config files from examples."""
+    """Test that hardstop init creates config files from examples."""
     sources_example, suppression_example = example_files
     
     # Mock Path to use our temp directory
@@ -38,7 +38,7 @@ def test_init_creates_config_files(config_dir, example_files, monkeypatch):
             return config_dir
         return original_path(path_str)
     
-    monkeypatch.setattr("sentinel.cli.Path", mock_path)
+    monkeypatch.setattr("hardstop.cli.Path", mock_path)
     
     # Create args namespace
     class Args:
@@ -62,7 +62,7 @@ def test_init_creates_config_files(config_dir, example_files, monkeypatch):
 
 
 def test_init_skips_existing_files(config_dir, example_files, monkeypatch):
-    """Test that sentinel init skips existing files unless --force."""
+    """Test that hardstop init skips existing files unless --force."""
     sources_example, suppression_example = example_files
     
     # Create existing config files
@@ -78,7 +78,7 @@ def test_init_skips_existing_files(config_dir, example_files, monkeypatch):
             return config_dir
         return original_path(path_str)
     
-    monkeypatch.setattr("sentinel.cli.Path", mock_path)
+    monkeypatch.setattr("hardstop.cli.Path", mock_path)
     
     # Create args namespace
     class Args:
@@ -95,7 +95,7 @@ def test_init_skips_existing_files(config_dir, example_files, monkeypatch):
 
 
 def test_init_force_overwrites_existing_files(config_dir, example_files, monkeypatch):
-    """Test that sentinel init --force overwrites existing files."""
+    """Test that hardstop init --force overwrites existing files."""
     sources_example, suppression_example = example_files
     
     # Create existing config files
@@ -111,7 +111,7 @@ def test_init_force_overwrites_existing_files(config_dir, example_files, monkeyp
             return config_dir
         return original_path(path_str)
     
-    monkeypatch.setattr("sentinel.cli.Path", mock_path)
+    monkeypatch.setattr("hardstop.cli.Path", mock_path)
     
     # Create args namespace
     class Args:
@@ -140,7 +140,7 @@ def test_init_validates_yaml(config_dir, example_files, monkeypatch):
             return config_dir
         return original_path(path_str)
     
-    monkeypatch.setattr("sentinel.cli.Path", mock_path)
+    monkeypatch.setattr("hardstop.cli.Path", mock_path)
     
     # Create args namespace
     class Args:

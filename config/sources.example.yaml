@@ -5,7 +5,7 @@ defaults:
   enabled: true  # Sources are enabled by default
   max_items_per_fetch: 50  # Maximum items to fetch per source per run
   timeout_seconds: 20  # HTTP request timeout
-  user_agent: "sentinel-agent/1.0 (YourOrg; contact: you@example.com)"  # User-Agent header for HTTP requests
+  user_agent: "hardstop-agent/1.0 (YourOrg; contact: you@example.com)"  # User-Agent header for HTTP requests
   rate_limit:
     per_host_min_seconds: 2  # Minimum seconds between requests to same host
     jitter_seconds: 1  # Random jitter to avoid synchronized requests

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import jsonschema
 
-import sentinel.ops.run_record as run_record_module
-from sentinel.ops.run_record import (
+import hardstop.ops.run_record as run_record_module
+from hardstop.ops.run_record import (
     ArtifactRef,
     Diagnostic,
     canonicalize_time_factory,
@@ -47,7 +47,7 @@ def test_emit_run_record_matches_schema(tmp_path: Path):
     )
     warning = Diagnostic(code="WARN001", message="Example warning")
     record = emit_run_record(
-        operator_id="sentinel.run@1.0.0",
+        operator_id="hardstop.run@1.0.0",
         mode="strict",
         config_snapshot={"runtime": {"version": "1.0.0"}},
         input_refs=[input_ref],
@@ -79,7 +79,7 @@ def test_emit_run_record_replay_mode_fixed_identifiers(tmp_path: Path):
     started_at = "2024-01-01T00:00:00.123456Z"
     ended_at = "2024-01-01T00:05:00.987654Z"
     record = emit_run_record(
-        operator_id="sentinel.brief@1.0.0",
+        operator_id="hardstop.brief@1.0.0",
         mode="strict",
         run_id=fixed_run_id,
         started_at=started_at,
@@ -115,7 +115,7 @@ def test_emit_run_record_failure_includes_errors_and_schema_valid(tmp_path: Path
     }
     canonicalize_time = canonicalize_time_factory(precision=0)
     record = emit_run_record(
-        operator_id="sentinel.failure@1.0.0",
+        operator_id="hardstop.failure@1.0.0",
         mode="strict",
         run_id="00000000-0000-0000-0000-000000000999",
         started_at="2024-02-01T05:06:07.123456Z",
@@ -187,7 +187,7 @@ def test_emit_run_record_cli_smoke_deterministic_filename(tmp_path: Path):
     dest_dir = tmp_path / "cli"
     dest_dir.mkdir()
     emit_run_record(
-        operator_id="sentinel.cli@1.0.0",
+        operator_id="hardstop.cli@1.0.0",
         mode="best-effort",
         run_id=run_id,
         started_at=started_at,

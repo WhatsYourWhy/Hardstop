@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 
-from sentinel.utils.time import to_utc_z, utc_now_z
+from hardstop.utils.time import to_utc_z, utc_now_z
 
 
 def test_utc_now_z_always_ends_with_z():

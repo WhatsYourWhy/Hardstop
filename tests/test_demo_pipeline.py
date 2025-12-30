@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
-from sentinel.alerts.alert_builder import build_basic_alert
-from sentinel.parsing.entity_extractor import attach_dummy_entities
-from sentinel.parsing.normalizer import normalize_event
+from hardstop.alerts.alert_builder import build_basic_alert
+from hardstop.parsing.entity_extractor import attach_dummy_entities
+from hardstop.parsing.normalizer import normalize_event
 
 
 def test_demo_pipeline():

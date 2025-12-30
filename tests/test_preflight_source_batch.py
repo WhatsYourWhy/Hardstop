@@ -2,7 +2,7 @@
 
 import pytest
 
-from sentinel.runners.ingest_external import preflight_source_batch
+from hardstop.runners.ingest_external import preflight_source_batch
 
 
 def test_preflight_accepts_empty_batch():

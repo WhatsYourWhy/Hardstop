@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sentinel.local/docs/specs/run-record.schema.json",
-  "title": "Sentinel Run Record",
-  "description": "Provenance unit emitted by every Sentinel operator execution.",
+  "$id": "https://hardstop.local/docs/specs/run-record.schema.json",
+  "title": "Hardstop Run Record",
+  "description": "Provenance unit emitted by every Hardstop operator execution.",
   "type": "object",
   "additionalProperties": false,
   "required": [

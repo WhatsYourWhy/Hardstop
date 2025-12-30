@@ -2,8 +2,8 @@
 
 import pytest
 
-from sentinel.suppression.engine import evaluate_suppression
-from sentinel.suppression.models import SuppressionRule
+from hardstop.suppression.engine import evaluate_suppression
+from hardstop.suppression.models import SuppressionRule
 
 
 def test_keyword_match_any_field():

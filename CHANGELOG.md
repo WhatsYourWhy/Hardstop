@@ -11,11 +11,11 @@
   - `FetchResult` now captures `bytes_downloaded` for deterministic audit trails
 - Structured source health scoring
   - New health score (0-100) plus failure-budget states (`HEALTHY`, `WATCH`, `BLOCKED`)
-  - `sentinel sources health` surfaces scores, failure streaks, and suppression ratios
-  - `sentinel doctor` and `sentinel run --strict` gate on exhausted budgets
+  - `hardstop sources health` surfaces scores, failure streaks, and suppression ratios
+  - `hardstop doctor` and `hardstop run --strict` gate on exhausted budgets
 - Suppression observability
   - Every suppression decision records a stable reason code
-  - `sentinel sources health --explain-suppress <id>` prints reason counts with deterministic samples
+  - `hardstop sources health --explain-suppress <id>` prints reason counts with deterministic samples
 - Database diagnostics
   - `source_runs.diagnostics_json` stores fetch/ingest envelopes (bytes, dedupe, suppression reasons)
   - Raw items/events include `suppression_reason_code` for trend queries
@@ -27,8 +27,8 @@
 - Doctor command now reports failure-budget warnings/blockers alongside stale counts
 
 ### Technical
-- New helper `sentinel.ops.source_health.compute_health_score`
-- `sentinel.config.loader` normalization utilities with tier-aware defaults
+- New helper `hardstop.ops.source_health.compute_health_score`
+- `hardstop.config.loader` normalization utilities with tier-aware defaults
 - `summarize_suppression_reasons()` helper for CLI explain output
 - Tests cover health scoring, suppression summaries, and failure-budget gating
 # Changelog
@@ -41,7 +41,7 @@
   - Exit code 1 (Warning): Some sources stale/failing, but pipeline functioning
   - Exit code 2 (Broken): Schema/config invalid, cannot fetch/ingest at all
   - `--strict` flag to treat warnings as broken
-- Run status evaluation module (`sentinel/ops/run_status.py`)
+- Run status evaluation module (`hardstop/ops/run_status.py`)
   - Deterministic evaluation of run health
   - Checks config errors, schema drift, source failures, ingest crashes
   - Provides actionable status messages
@@ -51,7 +51,7 @@
   - No silent failures - every source batch gets a record
 - `--fail-fast` flag for ingest operations
   - Stop processing on first source failure
-  - Available in `sentinel ingest-external` and `sentinel run`
+  - Available in `hardstop ingest-external` and `hardstop run`
 - Doctor command enhancements
   - "What would I do next?" section with priority-based recommendations
   - Last run group summary showing fetch/ingest statistics
@@ -59,17 +59,17 @@
 - Starter configuration files
   - `config/sources.example.yaml` with explanatory comments
   - `config/suppression.example.yaml` with conservative defaults
-  - `sentinel init` command to create config files from examples
+  - `hardstop init` command to create config files from examples
   - `--force` flag to overwrite existing configs
 
 ### Changed
-- `sentinel run` now evaluates status and exits with appropriate code
-- `sentinel run` prints status footer with top issues
+- `hardstop run` now evaluates status and exits with appropriate code
+- `hardstop run` prints status footer with top issues
 - Ingest pipeline guarantees SourceRun creation even on catastrophic failures
 - Doctor command provides actionable next steps instead of just diagnostics
 
 ### Technical
-- New module: `sentinel/ops/run_status.py` for status evaluation
+- New module: `hardstop/ops/run_status.py` for status evaluation
 - Enhanced `ingest_external.main()` with guaranteed SourceRun creation
 - Improved error handling and reporting throughout pipeline
 - All failure paths are now auditable via SourceRun records
@@ -83,8 +83,8 @@
   - `run_group_id` UUID linking related fetch and ingest runs
   - Health metrics: success rate, stale detection, last error, last status code
 - Source health commands
-  - `sentinel sources test <id>`: Test a single source with summary output
-  - `sentinel sources health`: Display health table for all sources
+  - `hardstop sources test <id>`: Test a single source with summary output
+  - `hardstop sources health`: Display health table for all sources
   - `--stale` and `--lookback` flags for health queries
 - SourceRun repository functions
   - `create_source_run()`: Create run records with metrics
@@ -205,11 +205,11 @@
   - Exponential backoff for retries
   - Graceful handling of 404s and network errors
 - New CLI commands
-  - `sentinel sources list`: List configured sources
-  - `sentinel fetch`: Fetch items from external sources
-  - `sentinel ingest-external`: Normalize and ingest raw items
-  - `sentinel run`: Convenience command (fetch + ingest)
-  - `sentinel doctor`: Health checks for schema and config
+  - `hardstop sources list`: List configured sources
+  - `hardstop fetch`: Fetch items from external sources
+  - `hardstop ingest-external`: Normalize and ingest raw items
+  - `hardstop run`: Convenience command (fetch + ingest)
+  - `hardstop doctor`: Health checks for schema and config
 - Event persistence for external events
   - External events stored in `events` table
   - Source metadata in `evidence.source` field
@@ -249,7 +249,7 @@
 ## [0.5.0] - 2024-XX-XX
 
 ### Added
-- Daily brief generation (`sentinel brief --today`)
+- Daily brief generation (`hardstop brief --today`)
 - Brief query logic with time window filtering (24h, 72h, 7d)
 - Markdown and JSON output formats for briefs
 - `impact_score` column in alerts table

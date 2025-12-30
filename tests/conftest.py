@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from sentinel.database.migrate import (
+from hardstop.database.migrate import (
     ensure_alert_correlation_columns,
     ensure_event_external_fields,
     ensure_raw_items_table,
@@ -12,7 +12,7 @@ from sentinel.database.migrate import (
     ensure_suppression_columns,
     ensure_trust_tier_columns,
 )
-from sentinel.database.schema import Base
+from hardstop.database.schema import Base
 
 
 @pytest.fixture

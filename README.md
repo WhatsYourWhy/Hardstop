@@ -1,10 +1,10 @@
-# Sentinel
+# Hardstop
 
-**Sentinel** is a local-first, domain-agnostic event → risk → alert engine designed for personal daily driver use. It monitors external sources (RSS feeds, government APIs, alerts) and generates actionable risk alerts by linking events to your operational network.
+**Hardstop** is a local-first, domain-agnostic event → risk → alert engine designed for personal daily driver use. It monitors external sources (RSS feeds, government APIs, alerts) and generates actionable risk alerts by linking events to your operational network.
 
-## What is Sentinel?
+## What is Hardstop?
 
-Sentinel solves the problem of information overload from multiple alert sources. Instead of manually checking dozens of feeds, Sentinel:
+Hardstop solves the problem of information overload from multiple alert sources. Instead of manually checking dozens of feeds, Hardstop:
 
 - **Monitors** public sources (NWS alerts, FDA recalls, USCG notices, RSS feeds)
 - **Filters** noise using configurable suppression rules
@@ -24,10 +24,10 @@ Sentinel solves the problem of information overload from multiple alert sources.
 
 ## Connect your tools
 
-Sentinel is designed to be local-first but still play nicely with your collaboration stack. Use the [integrations guide](docs/INTEGRATIONS.md) for:
+Hardstop is designed to be local-first but still play nicely with your collaboration stack. Use the [integrations guide](docs/INTEGRATIONS.md) for:
 
 - Posting daily briefs to Slack or other chat tools
-- Pairing Sentinel runs with CI/CD in GitHub or GitLab
+- Pairing Hardstop runs with CI/CD in GitHub or GitLab
 - Allowing agents or automations to act on deterministic alerts
 - Mirroring high-impact alerts into Linear or other work trackers
 
@@ -37,7 +37,7 @@ Sentinel is designed to be local-first but still play nicely with your collabora
 - Self-evaluating runs with exit codes (healthy/warning/broken)
 - Source health tracking and monitoring
 - Guaranteed failure reporting (no silent failures)
-- Smooth first-time setup with `sentinel init`
+- Smooth first-time setup with `hardstop init`
 - Comprehensive health checks with actionable recommendations
 
 ## Features
@@ -55,11 +55,11 @@ Sentinel is designed to be local-first but still play nicely with your collabora
 - **Alert Correlation**: Deduplicate and update alerts based on correlation keys
 - **Tier-Aware Briefing**: Generate summaries with tier counts, badges, and grouping (markdown or JSON)
 - **Run Status Evaluation**: Self-evaluating runs with exit codes (0=healthy, 1=warning, 2=broken)
-- **Health Checks**: Comprehensive `sentinel doctor` command with actionable recommendations
+- **Health Checks**: Comprehensive `hardstop doctor` command with actionable recommendations
 
 ### Exit Codes
 
-Sentinel runs are self-evaluating and exit with appropriate codes:
+Hardstop runs are self-evaluating and exit with appropriate codes:
 
 - **0 (Healthy)**: No critical issues, pipeline functioning normally
 - **1 (Warning)**: Some sources stale/failing, but pipeline still functioning
@@ -83,7 +83,7 @@ source .venv/bin/activate
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 
-# Install Sentinel
+# Install Hardstop
 pip install -e .
 
 # For contributors (includes pytest and dev tools):
@@ -94,20 +94,20 @@ pip install -e ".[dev]"
 
 ```bash
 # Initialize configuration files from examples
-sentinel init
+hardstop init
 
 # Review and customize config files
 # - config/sources.yaml: Configure your sources
 # - config/suppression.yaml: Configure suppression rules
 
 # Load network data (required for network linking)
-sentinel ingest
+hardstop ingest
 
 # Run your first fetch and ingest
-sentinel run --since 24h
+hardstop run --since 24h
 
 # Generate your first brief
-sentinel brief --today --since 24h
+hardstop brief --today --since 24h
 ```
 
 ### Demo Pipeline (P0 verification)
@@ -119,10 +119,10 @@ Use the baked-in demo workflow when you need a deterministic sanity check of the
 python3 -m pip install -e ".[dev]"
 
 # Load the golden-path network data into SQLite (idempotent)
-python3 -m sentinel.runners.load_network
+python3 -m hardstop.runners.load_network
 
 # Execute the end-to-end demo pipeline (reads event fixture, links network, builds alert)
-python3 -m sentinel.runners.run_demo
+python3 -m hardstop.runners.run_demo
 ```
 
 You should see a single alert emitted (currently `ALERT-20251229-bb25eb7a`) with:
@@ -143,19 +143,19 @@ Both commands are deterministic; if they diverge from the outputs above, capture
 
 ```bash
 # Fetch and process new events
-sentinel run --since 24h
+hardstop run --since 24h
 
 # Check system health
-sentinel doctor
+hardstop doctor
 
 # View daily brief
-sentinel brief --today --since 24h
+hardstop brief --today --since 24h
 
 # Monitor source health
-sentinel sources health
+hardstop sources health
 
 # Test a specific source
-sentinel sources test <source_id> --since 72h
+hardstop sources test <source_id> --since 72h
 ```
 
 ## Usage
@@ -166,49 +166,49 @@ sentinel sources test <source_id> --since 72h
 
 ```bash
 # List all configured sources
-sentinel sources list
+hardstop sources list
 
 # Test a specific source
-sentinel sources test <source_id> [--since 24h] [--max-items 20] [--ingest]
+hardstop sources test <source_id> [--since 24h] [--max-items 20] [--ingest]
 
 # View source health table
-sentinel sources health [--stale 48h] [--lookback 10] [--explain-suppress <source_id>]
+hardstop sources health [--stale 48h] [--lookback 10] [--explain-suppress <source_id>]
 ```
 
 #### Fetching and Ingestion
 
 ```bash
 # Fetch items from all enabled sources
-sentinel fetch [--tier global|regional|local] [--since 24h] [--max-items-per-source 10]
+hardstop fetch [--tier global|regional|local] [--since 24h] [--max-items-per-source 10]
 
 # Ingest fetched items into events and alerts
-sentinel ingest-external [--since 24h] [--no-suppress] [--explain-suppress] [--fail-fast]
+hardstop ingest-external [--since 24h] [--no-suppress] [--explain-suppress] [--fail-fast]
 
 # Convenience: fetch + ingest in one command
-sentinel run [--since 24h] [--stale 48h] [--strict] [--no-suppress] [--fail-fast]
+hardstop run [--since 24h] [--stale 48h] [--strict] [--no-suppress] [--fail-fast]
 ```
 
 #### Briefing
 
 ```bash
 # Generate daily brief (markdown)
-sentinel brief --today [--since 24h|72h|7d] [--limit 20] [--include-class0]
+hardstop brief --today [--since 24h|72h|7d] [--limit 20] [--include-class0]
 
 # Generate brief in JSON format
-sentinel brief --today --format json
+hardstop brief --today --format json
 
 # Custom time window
-sentinel brief --today --since 72h
+hardstop brief --today --since 72h
 ```
 
 #### Health and Diagnostics
 
 ```bash
 # Run comprehensive health checks
-sentinel doctor
+hardstop doctor
 
 # Initialize configuration files
-sentinel init [--force]
+hardstop init [--force]
 ```
 
 ### Configuration
@@ -287,7 +287,7 @@ rules:
 
 ### Source Health Monitoring
 
-Sentinel tracks the health of all sources:
+Hardstop tracks the health of all sources:
 
 - **Fetch Success Rate**: Percentage of successful fetches over last N runs
 - **Stale Detection**: Sources that haven't succeeded in X hours
@@ -297,21 +297,21 @@ Sentinel tracks the health of all sources:
 - **Suppression Analytics**: Reason codes and samples are captured per source so noisy rules can be tuned.
 
 **Commands:**
-- `sentinel sources health`: View health table for all sources
-- `sentinel sources health --explain-suppress <id>`: Print suppression reason codes and samples for a source
-- `sentinel sources test <id>`: Test a specific source and view results
-- `sentinel doctor`: Includes source health checks and recommendations
+- `hardstop sources health`: View health table for all sources
+- `hardstop sources health --explain-suppress <id>`: Print suppression reason codes and samples for a source
+- `hardstop sources test <id>`: Test a specific source and view results
+- `hardstop doctor`: Includes source health checks and recommendations
 
 ### Exit Codes and Run Status
 
-Sentinel runs are self-evaluating:
+Hardstop runs are self-evaluating:
 
 - **Exit Code 0 (Healthy)**: All systems functioning normally
 - **Exit Code 1 (Warning)**: Some sources failing/stale, but pipeline functioning
 - **Exit Code 2 (Broken)**: Critical issues (schema drift, config errors, all sources failed)
 
 **Run Status Footer:**
-After each `sentinel run`, you'll see:
+After each `hardstop run`, you'll see:
 ```
 ==================================================
 Run status: HEALTHY
@@ -324,7 +324,7 @@ Use `--strict` to treat warnings as broken (exit code 2).
 
 ## Architecture
 
-Sentinel Runtime is built around a deterministic loop: adapters ingest bounded sets of signals, operators transform them with explicit read/write contracts, and the runtime emits fingerprinted artifacts plus run records for replay. Design goals:
+Hardstop Runtime is built around a deterministic loop: adapters ingest bounded sets of signals, operators transform them with explicit read/write contracts, and the runtime emits fingerprinted artifacts plus run records for replay. Design goals:
 
 - **Deterministic by default**: Strict mode disallows nondeterministic dependencies and guarantees replayability.
 - **Explicit inputs/outputs**: Every operator declares the artifact types it touches and records those refs in a RunRecord.
@@ -333,15 +333,15 @@ Sentinel Runtime is built around a deterministic loop: adapters ingest bounded s
 
 Layers used in practice:
 
-1. **Ingestion Layer** – `sentinel/retrieval` adapters fetch and fingerprint signals.
-2. **Decision Core** – canonicalization, noise control, correlation, and scoring operators under `sentinel/parsing`, `sentinel/suppression`, and `sentinel/alerts`.
-3. **Artifact Layer** – SQLite repositories plus reporting (`sentinel/output`, `sentinel/api`) persist and render decision artifacts.
+1. **Ingestion Layer** – `hardstop/retrieval` adapters fetch and fingerprint signals.
+2. **Decision Core** – canonicalization, noise control, correlation, and scoring operators under `hardstop/parsing`, `hardstop/suppression`, and `hardstop/alerts`.
+3. **Artifact Layer** – SQLite repositories plus reporting (`hardstop/output`, `hardstop/api`) persist and render decision artifacts.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full runtime specification and operator taxonomy, and refer to [docs/specs/run-record.schema.json](docs/specs/run-record.schema.json) for the RunRecord contract used by every operator execution.
 
 ### Run Records in Practice
 
-Running `sentinel run` now emits a RunRecord JSON document under `run_records/`. Each record includes the merged configuration fingerprint, execution mode (strict vs best-effort), hashed references to the run group id, and the resolved run-status diagnostics. The schema matches `docs/specs/run-record.schema.json`, so you can validate or replay runs in downstream tooling by pointing a JSON Schema validator at the generated files.
+Running `hardstop run` now emits a RunRecord JSON document under `run_records/`. Each record includes the merged configuration fingerprint, execution mode (strict vs best-effort), hashed references to the run group id, and the resolved run-status diagnostics. The schema matches `docs/specs/run-record.schema.json`, so you can validate or replay runs in downstream tooling by pointing a JSON Schema validator at the generated files.
 
 For deterministic or replayed runs, you can supply your own `run_id`, `started_at`, and `ended_at` values plus an optional `canonicalize_time` helper to round timestamps (e.g., strip microseconds) or pin them to test fixtures. When you need stable filenames (CI snapshots), pass `filename_basename` to `emit_run_record` so the record does not embed wall-clock timestamps. If an operator uses nondeterministic inputs, populate `best_effort` metadata (seed, model version, notes) so replays document the entropy sources.
 
@@ -357,7 +357,7 @@ bands are:
    every operator remains replayable.
 2. **P1 – Source reliability & health:** revamp the source registry, enhance
    health scoring and suppression observability, and wire failure budgets into
-   `sentinel sources health` + `sentinel doctor`.
+   `hardstop sources health` + `hardstop doctor`.
 3. **P2 – Decision core & artifact quality:** refactor canonicalization,
    improve impact scoring explanations, add correlation evidence, and ship an
    incident replay CLI.
@@ -376,7 +376,7 @@ Each release should confirm which priority band is active and update this file,
 ## Project Structure
 
 ```
-sentinel-agent/
+hardstop-agent/
 ├── README.md
 ├── CHANGELOG.md
 ├── pyproject.toml
@@ -388,7 +388,7 @@ sentinel-agent/
 │   └── suppression.example.yaml  # Example suppression config
 ├── docs/
 │   └── ARCHITECTURE.md       # Detailed architecture documentation
-├── src/sentinel/
+├── src/hardstop/
 │   ├── retrieval/            # External source retrieval
 │   ├── suppression/          # Suppression engine
 │   ├── parsing/              # Event normalization and entity linking
@@ -410,7 +410,7 @@ Contributions welcome! See the codebase for examples of:
 
 ## License
 
-Sentinel is distributed under the [Sentinel Business License (SBL-1.0)](LICENSE).
+Hardstop is distributed under the [Hardstop Business License (SBL-1.0)](LICENSE).
 You may evaluate, research, or personally experiment with the code at no cost,
 but any production or revenue-generating use requires a commercial agreement
 with WhatsYourWhy, Inc. On January 1, 2029 this codebase is scheduled to

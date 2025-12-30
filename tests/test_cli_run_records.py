@@ -8,9 +8,9 @@ from types import SimpleNamespace
 import jsonschema
 import pytest
 
-from sentinel import cli
-from sentinel.ops import run_record
-from sentinel.retrieval.fetcher import FetchResult
+from hardstop import cli
+from hardstop.ops import run_record
+from hardstop.retrieval.fetcher import FetchResult
 
 
 def _instrument_run_record(tmp_path, monkeypatch):
@@ -40,7 +40,7 @@ def _fake_session_context(_path):
 
 
 def _stub_config(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "load_config", lambda: {"storage": {"sqlite_path": str(tmp_path / "sentinel.db")}})
+    monkeypatch.setattr(cli, "load_config", lambda: {"storage": {"sqlite_path": str(tmp_path / "hardstop.db")}})
     monkeypatch.setattr(cli, "resolve_config_snapshot", lambda: {"runtime": {"mode": "test"}})
 
 
@@ -103,7 +103,7 @@ def test_cmd_fetch_emits_run_record_success(monkeypatch, tmp_path):
     cli.cmd_fetch(args, run_group_id="group-fetch")
 
     data = _load_validated_record(records_dir)
-    assert data["operator_id"] == "sentinel.fetch@1.0.0"
+    assert data["operator_id"] == "hardstop.fetch@1.0.0"
     assert not data["errors"]
     assert any(ref["id"] == "run-group:group-fetch" for ref in data["input_refs"])
     assert any(ref["kind"] == "RawItemBatch" for ref in data["output_refs"])
@@ -143,7 +143,7 @@ def test_cmd_fetch_emits_run_record_on_failure(monkeypatch, tmp_path):
         cli.cmd_fetch(args, run_group_id="group-fetch-fail")
 
     data = _load_validated_record(records_dir)
-    assert data["operator_id"] == "sentinel.fetch@1.0.0"
+    assert data["operator_id"] == "hardstop.fetch@1.0.0"
     assert data["errors"]
 
 
@@ -173,7 +173,7 @@ def test_cmd_ingest_emits_run_record_success(monkeypatch, tmp_path):
     cli.cmd_ingest_external(args, run_group_id="group-ingest")
 
     data = _load_validated_record(records_dir)
-    assert data["operator_id"] == "sentinel.ingest@1.0.0"
+    assert data["operator_id"] == "hardstop.ingest@1.0.0"
     assert data["mode"] == "strict"
     assert any(ref["kind"] == "SourceRun" for ref in data["output_refs"])
 
@@ -203,7 +203,7 @@ def test_cmd_ingest_emits_run_record_on_failure(monkeypatch, tmp_path):
         cli.cmd_ingest_external(args, run_group_id="group-ingest-fail")
 
     data = _load_validated_record(records_dir)
-    assert data["operator_id"] == "sentinel.ingest@1.0.0"
+    assert data["operator_id"] == "hardstop.ingest@1.0.0"
     assert data["errors"]
 
 
@@ -226,7 +226,7 @@ def test_cmd_brief_emits_run_record_success(monkeypatch, tmp_path):
     cli.cmd_brief(args, run_group_id="group-brief")
 
     data = _load_validated_record(records_dir)
-    assert data["operator_id"] == "sentinel.brief@1.0.0"
+    assert data["operator_id"] == "hardstop.brief@1.0.0"
     assert not data["errors"]
     assert any(ref["kind"] == "Brief" for ref in data["output_refs"])
     expected_hash = hashlib.sha256("brief-md".encode("utf-8")).hexdigest()
@@ -257,5 +257,5 @@ def test_cmd_brief_emits_run_record_on_failure(monkeypatch, tmp_path):
         cli.cmd_brief(args, run_group_id="group-brief-fail")
 
     data = _load_validated_record(records_dir)
-    assert data["operator_id"] == "sentinel.brief@1.0.0"
+    assert data["operator_id"] == "hardstop.brief@1.0.0"
     assert data["errors"]
