@@ -1,10 +1,14 @@
+import argparse
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import jsonschema
 
+from hardstop import cli
 import hardstop.ops.run_record as run_record_module
+from hardstop.output.incidents import build_incident_evidence_artifact
 from hardstop.ops.run_record import (
     ArtifactRef,
     Diagnostic,
@@ -207,3 +211,55 @@ def test_emit_run_record_cli_smoke_deterministic_filename(tmp_path: Path):
     jsonschema.validate(instance=data, schema=schema)
     assert data["run_id"] == run_id
     assert data["mode"] == "best-effort"
+
+
+def test_cmd_incidents_replay_emits_run_record(monkeypatch, tmp_path: Path):
+    records_dir = tmp_path / "records"
+    artifacts_dir = tmp_path / "incidents"
+    snapshot = {"runtime": {"mode": "strict"}, "sources": {"version": 1}}
+
+    # Seed baseline artifact and RunRecord to replay
+    artifact, artifact_ref, _ = build_incident_evidence_artifact(
+        alert_id="ALERT-XYZ",
+        event={"event_id": "EVT-1", "event_type": "SPILL", "title": "test spill"},
+        correlation_key="SPILL|A|B",
+        existing_alert=SimpleNamespace(
+            alert_id="ALERT-XYZ",
+            correlation_key="SPILL|A|B",
+            last_seen_utc="2024-05-01T00:00:00Z",
+            scope_json=json.dumps({"facilities": ["A"], "lanes": ["B"], "shipments": []}),
+            root_event_ids_json=json.dumps(["EVT-0"]),
+        ),
+        window_hours=24,
+        dest_dir=artifacts_dir,
+        generated_at="2024-05-02T00:00:00Z",
+        filename_basename="ALERT-XYZ__EVT-1__SPILL_A_B",
+    )
+    run_record_module.emit_run_record(
+        operator_id="correlation.window@1.0.0",
+        mode="strict",
+        config_snapshot=snapshot,
+        input_refs=[],
+        output_refs=[artifact_ref],
+        dest_dir=records_dir,
+    )
+
+    monkeypatch.setattr(cli, "resolve_config_snapshot", lambda: snapshot)
+    args = argparse.Namespace(
+        incident_id="ALERT-XYZ",
+        correlation_key="SPILL|A|B",
+        artifacts_dir=artifacts_dir,
+        records_dir=records_dir,
+        strict=True,
+        format="json",
+    )
+
+    result = cli.cmd_incidents_replay(args)
+    assert result["artifact_hash"] == artifact.artifact_hash
+    files = sorted(records_dir.glob("*.json"))
+    assert len(files) >= 2  # baseline + replay
+    replay_record = json.loads(files[-1].read_text(encoding="utf-8"))
+    schema = json.loads(Path("docs/specs/run-record.schema.json").read_text(encoding="utf-8"))
+    jsonschema.validate(instance=replay_record, schema=schema)
+    assert replay_record["operator_id"] == "hardstop.incidents.replay@1.0.0"
+    assert replay_record["config_hash"] == fingerprint_config(snapshot)
