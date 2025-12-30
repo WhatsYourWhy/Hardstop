@@ -1,6 +1,12 @@
 """Tests for alert correlation functionality."""
 
+import json
+from pathlib import Path
+
 from hardstop.alerts.correlation import build_correlation_key
+from hardstop.ops.run_record import artifact_hash
+from hardstop.parsing.entity_extractor import EntityLinkingOperator
+from hardstop.parsing.normalizer import CanonicalizeExternalEventOperator
 
 
 def test_build_correlation_key_stable():
@@ -96,3 +102,41 @@ def test_correlation_key_deduplicates_facilities():
     # So both should use the same first facility
     assert key1 == key2
 
+
+def test_canonical_payload_hash_matches_fixture(tmp_path):
+    raw = json.loads(Path("tests/fixtures/event_spill.json").read_text(encoding="utf-8"))
+    fixture = json.loads(Path("tests/fixtures/normalized_event_spill.json").read_text(encoding="utf-8"))
+    operator = CanonicalizeExternalEventOperator(
+        mode="strict", config_snapshot={}, dest_dir=tmp_path, canonicalize_time=None
+    )
+    event, _ = operator.run(
+        raw_item_candidate={
+            "canonical_id": "EVT-CANONICAL-0001",
+            "title": raw.get("title"),
+            "url": "https://example.com/spill",
+            "published_at_utc": "2024-05-01T00:00:00Z",
+            "payload": raw,
+        },
+        source_id="demo-source",
+        tier="global",
+        raw_id="raw-0001",
+        source_config={"trust_tier": 2},
+        emit_record=False,
+    )
+    assert artifact_hash(event) == artifact_hash(fixture)
+
+
+def test_entity_link_partial_data_fallback(tmp_path):
+    event = {
+        "event_id": "EVT-PARTIAL",
+        "event_type": "SPILL",
+        "facilities": [],
+        "lanes": [],
+        "shipments": [],
+    }
+    linker = EntityLinkingOperator(mode="strict", config_snapshot={}, dest_dir=tmp_path)
+    enriched, _ = linker.run(event, session=None, emit_record=False)
+    assert enriched["facilities"] == []
+    assert enriched["lanes"] == []
+    assert enriched["shipments"] == []
+    assert build_correlation_key(enriched).startswith("SPILL|NONE|NONE")

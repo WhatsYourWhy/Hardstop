@@ -8,16 +8,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from hardstop.config.loader import (
-    load_config,
-    load_sources_config,
-    load_suppression_config,
-)
+from hardstop.config.loader import load_config, load_sources_config, load_suppression_config
 from hardstop.utils.time import utc_now_z
 
 
 def _canonical_dumps(data: Any) -> str:
     return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def canonical_dumps(data: Any) -> str:
+    """Return canonical JSON for artifact hashing (stable key ordering, compact spacing)."""
+
+    return json.dumps(data, default=str, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def artifact_hash(payload: Any) -> str:
+    """Compute SHA-256 for a payload using canonical JSON serialization."""
+
+    canonical = canonical_dumps(payload).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _prune_none(value: Any) -> Any:
@@ -181,6 +190,8 @@ def emit_run_record(
 
 __all__ = [
     "ArtifactRef",
+    "artifact_hash",
+    "canonical_dumps",
     "Diagnostic",
     "RunRecord",
     "emit_run_record",

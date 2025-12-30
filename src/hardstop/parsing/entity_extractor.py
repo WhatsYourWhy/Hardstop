@@ -1,11 +1,19 @@
 import re
 from datetime import datetime, timedelta
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
-from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from ..database.schema import Facility, Lane, Shipment
+from ..ops.run_record import (
+    ArtifactRef,
+    artifact_hash,
+    canonical_dumps,
+    emit_run_record,
+    resolve_config_snapshot,
+)
+from ..utils.time import utc_now_z
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,7 +32,7 @@ def attach_dummy_entities(event: Dict) -> Dict:
     return event
 
 
-def link_to_network(event: Dict, session: Session, days_ahead: int = 30) -> Dict:
+def link_to_network(event: Dict, session: Optional[Session], days_ahead: int = 30) -> Dict:
     """
     Link an event to actual network data by:
     1. Looking up facilities by city/state or facility_id
@@ -41,6 +49,13 @@ def link_to_network(event: Dict, session: Session, days_ahead: int = 30) -> Dict
         Updated event dict with facilities and shipments populated
     """
     matched_facility_ids = []
+
+    if session is None:
+        event.setdefault("facilities", [])
+        event.setdefault("lanes", [])
+        event.setdefault("shipments", [])
+        logger.info("No session provided to link_to_network; returning deterministic fallback entities.")
+        return event
     
     # If facilities are already specified, use those
     if event.get("facilities"):
@@ -162,3 +177,71 @@ def link_to_network(event: Dict, session: Session, days_ahead: int = 30) -> Dict
     
     return event
 
+
+def _artifact_size(payload: Dict) -> int:
+    return len(canonical_dumps(payload).encode("utf-8"))
+
+
+class EntityLinkingOperator:
+    """Operator wrapper that links facilities/lanes and emits a RunRecord."""
+
+    operator_id = "canonicalization.entity_link@1.0.0"
+    input_kind = "SignalCanonical"
+    output_kind = "SignalCanonicalEnriched"
+    output_schema = "signals/enriched/v1"
+
+    def __init__(
+        self,
+        *,
+        mode: str = "strict",
+        config_snapshot: Optional[Dict] = None,
+        canonicalize_time=None,
+        run_id: Optional[str] = None,
+        dest_dir: str = "run_records",
+    ) -> None:
+        self.mode = mode
+        self.config_snapshot = config_snapshot or resolve_config_snapshot()
+        self.canonicalize_time = canonicalize_time
+        self.run_id = run_id
+        self.dest_dir = dest_dir
+
+    def run(
+        self,
+        event: Dict,
+        session: Optional[Session],
+        days_ahead: int = 30,
+        emit_record: bool = True,
+    ) -> Tuple[Dict, Optional[object]]:
+        started_at = utc_now_z()
+        linked_event = link_to_network(dict(event), session, days_ahead)
+
+        if not emit_record:
+            return linked_event, None
+
+        input_ref = ArtifactRef(
+            id=f"event:{event.get('event_id', 'unknown')}",
+            hash=artifact_hash(event),
+            kind=self.input_kind,
+            schema="signals/v1",
+            bytes=_artifact_size(event),
+        )
+        output_ref = ArtifactRef(
+            id=f"event:{linked_event.get('event_id', 'unknown')}:linked",
+            hash=artifact_hash(linked_event),
+            kind=self.output_kind,
+            schema=self.output_schema,
+            bytes=_artifact_size(linked_event),
+        )
+        record = emit_run_record(
+            operator_id=self.operator_id,
+            mode=self.mode,
+            run_id=self.run_id,
+            started_at=started_at,
+            ended_at=utc_now_z(),
+            canonicalize_time=self.canonicalize_time,
+            config_snapshot=self.config_snapshot,
+            input_refs=[input_ref],
+            output_refs=[output_ref],
+            dest_dir=self.dest_dir,
+        )
+        return linked_event, record
