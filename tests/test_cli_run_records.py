@@ -259,3 +259,51 @@ def test_cmd_brief_emits_run_record_on_failure(monkeypatch, tmp_path):
     data = _load_validated_record(records_dir)
     assert data["operator_id"] == "hardstop.brief@1.0.0"
     assert data["errors"]
+
+
+def test_cmd_run_respects_readme_fetch_defaults(monkeypatch, tmp_path):
+    _stub_config(monkeypatch, tmp_path)
+    _stub_noops(monkeypatch)
+    monkeypatch.setattr(cli, "session_context", _fake_session_context)
+    monkeypatch.setattr(cli, "list_recent_runs", lambda *_, **__: [])
+    monkeypatch.setattr(cli, "get_all_source_health", lambda *_, **__: [])
+    monkeypatch.setattr(cli, "load_sources_config", lambda: {"version": 1, "tiers": {}, "defaults": {}})
+    monkeypatch.setattr(cli, "get_all_sources", lambda _cfg: [{"id": "source-1", "enabled": True}])
+    monkeypatch.setattr(cli, "load_suppression_config", lambda: {"version": 1, "enabled": True, "rules": []})
+    monkeypatch.setattr(cli, "emit_run_record", lambda **__: None)
+    monkeypatch.setattr(cli, "evaluate_run_status", lambda **__: (0, ["All systems healthy"]))
+
+    exit_codes: list[int] = []
+    monkeypatch.setattr(cli.sys, "exit", lambda code: exit_codes.append(code))
+
+    captures = {}
+
+    def _capture_fetch(args, run_group_id):
+        captures["fetch_args"] = args
+        captures["run_group_id"] = run_group_id
+
+    def _capture_ingest(args, run_group_id):
+        captures["ingest_args"] = args
+        assert run_group_id == captures["run_group_id"]
+
+    def _capture_brief(args, run_group_id):
+        captures["brief_args"] = args
+        assert run_group_id == captures["run_group_id"]
+
+    monkeypatch.setattr(cli, "cmd_fetch", _capture_fetch)
+    monkeypatch.setattr(cli, "cmd_ingest_external", _capture_ingest)
+    monkeypatch.setattr(cli, "cmd_brief", _capture_brief)
+
+    args = argparse.Namespace(
+        since="24h",
+        stale="48h",
+        strict=False,
+        no_suppress=False,
+        fail_fast=False,
+        allow_ingest_errors=False,
+    )
+
+    cli.cmd_run(args)
+
+    assert captures["fetch_args"].max_items_per_source == 10
+    assert exit_codes == [0]
