@@ -11,9 +11,11 @@ from ..alerts.alert_models import (
     AlertEvidence,
     AlertImpactAssessment,
     AlertScope,
+    IncidentEvidenceSummary,
     HardstopAlert,
 )
 from ..database.alert_repo import load_root_event_ids, query_recent_alerts
+from ..output.incidents.evidence import load_incident_evidence_summary
 from .models import AlertDetailDTO, AlertProvenance
 
 if TYPE_CHECKING:
@@ -72,6 +74,19 @@ def _alert_row_to_hardstop_alert(alert_row: "Alert") -> HardstopAlert:
                 "alert_id": alert_row.alert_id,
             },
         )
+    incident_summary_data = load_incident_evidence_summary(alert_row.alert_id, alert_row.correlation_key or "")
+    if incident_summary_data:
+        if evidence is None:
+            evidence = AlertEvidence(
+                diagnostics=None,
+                linking_notes=[],
+                correlation={
+                    "key": alert_row.correlation_key or "",
+                    "action": alert_row.correlation_action or None,
+                    "alert_id": alert_row.alert_id,
+                },
+            )
+        evidence.incident_evidence = IncidentEvidenceSummary(**incident_summary_data)
     
     return HardstopAlert(
         alert_id=alert_row.alert_id,
@@ -187,4 +202,3 @@ def get_alert_detail(
         source_runs_summary=source_runs_summary,
         provenance=provenance,
     )
-

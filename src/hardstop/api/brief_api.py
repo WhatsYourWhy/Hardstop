@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from ..database.alert_repo import query_recent_alerts
 from ..database.raw_item_repo import query_suppressed_items
+from ..output.incidents.evidence import load_incident_evidence_summary
 from ..utils.time import utc_now_z
 
 if TYPE_CHECKING:
@@ -66,6 +67,7 @@ def _load_scope(alert: "Alert") -> Dict:
 def _alert_to_dict(alert: "Alert") -> Dict:
     """Convert Alert row to dict for brief output (v0.7: includes tier and trust_tier)."""
     scope = _load_scope(alert)
+    evidence_summary = load_incident_evidence_summary(alert.alert_id, alert.correlation_key or "")
     
     return {
         "alert_id": alert.alert_id,
@@ -83,6 +85,7 @@ def _alert_to_dict(alert: "Alert") -> Dict:
         "update_count": alert.update_count or 0,
         "tier": alert.tier,  # v0.7: tier for grouping
         "trust_tier": alert.trust_tier,  # v0.7: trust tier
+        "evidence_summary": evidence_summary,
     }
 
 
@@ -234,4 +237,3 @@ def get_brief(
             "limit_applied": limit,
         },
     }
-

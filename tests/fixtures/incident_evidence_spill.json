@@ -1,0 +1,100 @@
+{
+  "artifact_hash": "aba3925edab1eb6c3c8387b51a0bd375a1d49444167d6115900d86fe3540aef7",
+  "artifact_version": "incident-evidence.v1",
+  "correlation_key": "SPILL|DC-01|LANE-1",
+  "generated_at_utc": "2024-05-02T00:00:00Z",
+  "inputs": {
+    "alert_id": "ALERT-XYZ",
+    "event": {
+      "event_id": "EVT-TEST-001",
+      "event_type": "SPILL",
+      "observed_at_utc": "2024-05-02T00:00:00Z",
+      "title": "Chemical spill at DC-01"
+    },
+    "existing_alert": {
+      "alert_id": "ALERT-XYZ",
+      "last_seen_utc": "2024-04-30T12:00:00Z",
+      "root_event_ids": [
+        "EVT-OLD-1"
+      ]
+    }
+  },
+  "kind": "IncidentEvidence",
+  "merge_reasons": [
+    {
+      "code": "CORRELATION_KEY_MATCH",
+      "details": {
+        "correlation_key": "SPILL|DC-01|LANE-1"
+      },
+      "matched": true,
+      "message": "Correlation key matched existing alert"
+    },
+    {
+      "code": "TEMPORAL_OVERLAP",
+      "details": {
+        "existing_last_seen_utc": "2024-04-30T12:00:00Z",
+        "window_hours": 168
+      },
+      "matched": true,
+      "message": "Existing alert seen within 168h window"
+    },
+    {
+      "code": "SHARED_FACILITIES",
+      "details": {
+        "shared": [
+          "DC-01"
+        ]
+      },
+      "matched": true,
+      "message": "Shared facilities: DC-01"
+    },
+    {
+      "code": "SHARED_LANES",
+      "details": {
+        "shared": [
+          "LANE-1"
+        ]
+      },
+      "matched": true,
+      "message": "Shared lanes: LANE-1"
+    }
+  ],
+  "merge_summary": [
+    "Correlation key matched existing alert",
+    "Existing alert seen within 168h window",
+    "Shared facilities: DC-01",
+    "Shared lanes: LANE-1"
+  ],
+  "overlap": {
+    "facilities": [
+      "DC-01"
+    ],
+    "lanes": [
+      "LANE-1"
+    ]
+  },
+  "scope": {
+    "existing": {
+      "facilities": [
+        "DC-01"
+      ],
+      "lanes": [
+        "LANE-1"
+      ],
+      "shipments": [
+        "SHIP-001"
+      ]
+    },
+    "incoming": {
+      "facilities": [
+        "DC-01",
+        "PLANT-02"
+      ],
+      "lanes": [
+        "LANE-1"
+      ],
+      "shipments": []
+    }
+  },
+  "window_hours": 168
+}

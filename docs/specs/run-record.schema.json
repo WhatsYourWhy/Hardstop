@@ -150,7 +150,7 @@
         },
         "kind": {
           "type": "string",
-          "description": "Artifact type (Signal, SignalCanonical, Incident, DecisionArtifact, Brief, etc.)."
+          "description": "Artifact type (Signal, SignalCanonical, IncidentEvidence, DecisionArtifact, Brief, etc.)."
         },
         "schema": {
           "type": "string",

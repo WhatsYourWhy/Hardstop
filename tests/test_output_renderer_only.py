@@ -3,6 +3,8 @@
 import ast
 from pathlib import Path
 
+from hardstop.output.daily_brief import render_markdown
+
 
 def test_daily_brief_is_renderer_only():
     """Test that output/daily_brief.py does not import repos or SQLAlchemy schema.
@@ -77,3 +79,38 @@ def test_daily_brief_is_renderer_only():
             "\n\nRenderer should only call api.brief_api.get_brief() and render the result."
         )
 
+
+def test_render_markdown_surfaces_evidence_summary():
+    """Ensure renderer surfaces incident evidence summaries without DB access."""
+    alert = {
+        "alert_id": "ALERT-1",
+        "classification": 2,
+        "impact_score": 9,
+        "summary": "Spill affecting primary lane",
+        "correlation": {"key": "SPILL|FAC-1|LANE-1", "action": "CREATED", "alert_id": "ALERT-1"},
+        "scope": {"facilities": ["FAC-1"], "lanes": ["LANE-1"], "shipments": [], "shipments_total_linked": 0, "shipments_truncated": False},
+        "first_seen_utc": "2024-05-01T00:00:00Z",
+        "last_seen_utc": "2024-05-01T00:00:00Z",
+        "update_count": 0,
+        "tier": "global",
+        "trust_tier": 2,
+        "evidence_summary": {
+            "merge_summary": ["Existing alert seen within 168h window", "Shared facilities: FAC-1"],
+            "artifact_hash": "abc123",
+        },
+    }
+    brief_data = {
+        "read_model_version": "brief.v1",
+        "generated_at_utc": "2024-05-02T00:00:00Z",
+        "window": {"since": "24h", "since_hours": 24},
+        "counts": {"new": 1, "updated": 0, "impactful": 1, "relevant": 0, "interesting": 0},
+        "tier_counts": {"global": 1, "regional": 0, "local": 0, "unknown": 0},
+        "top": [alert],
+        "updated": [],
+        "created": [alert],
+        "suppressed": {"count": 0, "by_rule": [], "by_source": []},
+        "suppressed_legacy": {"total_queried": 1, "limit_applied": 20},
+    }
+
+    markdown = render_markdown(brief_data)
+    assert "Evidence: Existing alert seen within 168h window; Shared facilities: FAC-1" in markdown

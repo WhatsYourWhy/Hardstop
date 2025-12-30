@@ -116,6 +116,14 @@ Implementation note: `hardstop.ops.run_record` contains the canonical emitter. C
 Fetch (`hardstop fetch`), ingest (`hardstop ingest-external`), and brief (`hardstop brief`) now emit per-operator RunRecords keyed by a shared `run_group_id`, threading raw-item batches, `SourceRun` rows, and brief artifacts through explicit input/output refs for provenance.
 Deterministic and replayed runs can provide fixed `run_id`, `started_at`, and `ended_at` values plus a `canonicalize_time` helper to normalize timestamps (e.g., round to whole seconds). File names can be pinned via `filename_basename` to avoid timestamp drift in golden fixtures. Best-effort (nondeterministic) runs must populate `best_effort` metadata to explain entropy sources and enable repeatability notes.
 
+### Incident Evidence Artifacts
+
+- Location: `output/incidents/`
+- Schema: `incident-evidence.v1` (non-decisional)
+- Purpose: Capture why alerts merged (temporal overlap, correlation key, shared facilities/lanes) and the inputs (alert_id, root_event_ids, event metadata) that drove the merge decision.
+- Hashing: Canonical JSON (`hardstop.ops.run_record.artifact_hash`) with `ArtifactRef.kind = "IncidentEvidence"` so RunRecords and briefs can reference the evidence payload.
+- Consumption: Brief/export renderers read the latest artifact per alert/correlation key to surface `merge_summary` strings without re-querying the DB, keeping reporting read-only and deterministic.
+
 ---
 
 ## Fingerprinting & Replayability

@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 
 class AlertAction(BaseModel):
@@ -38,6 +38,16 @@ class AlertDiagnostics(BaseModel):
     impact_score_rationale: dict[str, object] = {}
 
 
+class IncidentEvidenceSummary(BaseModel):
+    """Pointer to persisted incident evidence artifacts (non-decisional)."""
+
+    artifact_hash: Optional[str] = None
+    artifact_path: Optional[str] = None
+    merge_reasons: list[dict[str, object]] = Field(default_factory=list)
+    merge_summary: list[str] = Field(default_factory=list)
+    inputs: dict[str, object] = Field(default_factory=dict)
+
+
 class AlertEvidence(BaseModel):
     """Non-decisional evidence that supports alert decisions.
     
@@ -53,6 +63,7 @@ class AlertEvidence(BaseModel):
     # When session is None, action and alert_id are None (key is always computed)
     source: Optional[dict[str, str | int | None]] = None  # Source metadata for external events (v0.7)
     # Format: {"id": str, "tier": str, "raw_id": str, "url": str | None, "trust_tier": int | None}
+    incident_evidence: Optional[IncidentEvidenceSummary] = None  # Evidence artifact summary
 
 
 class HardstopAlert(BaseModel):

@@ -43,6 +43,15 @@ def generate_brief(
 def render_markdown(brief_data: Dict) -> str:
     """Render brief data as markdown."""
     lines = []
+
+    def _evidence_lines(alert: Dict) -> list[str]:
+        evidence_summary = alert.get("evidence_summary") or {}
+        merge_summary = evidence_summary.get("merge_summary") or []
+        if merge_summary:
+            return [f"  - Evidence: {'; '.join(merge_summary)}"]
+        if evidence_summary.get("artifact_hash"):
+            return [f"  - Evidence: artifact {evidence_summary['artifact_hash'][:8]}"]
+        return []
     
     # Header
     # Support both old format (since) and new format (window.since)
@@ -172,6 +181,7 @@ def render_markdown(brief_data: Dict) -> str:
                     f"  - **Last seen:** {alert['last_seen_utc']} | "
                     f"**Updates:** {alert['update_count']}"
                 )
+                lines.extend(_evidence_lines(alert))
                 lines.append("")
     
     # Updated Alerts (v0.7: grouped by tier)
@@ -213,6 +223,7 @@ def render_markdown(brief_data: Dict) -> str:
                 trust_tier_val = alert.get('trust_tier')
                 trust_suffix = f" (T{trust_tier_val})" if trust_tier_val else ""
                 lines.append(f"- **[{alert['classification']}]{badge}** {alert['summary']}{trust_suffix} — Updates: {alert['update_count']}")
+                lines.extend(_evidence_lines(alert))
             lines.append("")
     
     # New Alerts (v0.7: grouped by tier)
@@ -254,6 +265,7 @@ def render_markdown(brief_data: Dict) -> str:
                 trust_tier_val = alert.get('trust_tier')
                 trust_suffix = f" (T{trust_tier_val})" if trust_tier_val else ""
                 lines.append(f"- **[{alert['classification']}]{badge}** {alert['summary']}{trust_suffix}")
+                lines.extend(_evidence_lines(alert))
             lines.append("")
     
     return "\n".join(lines)
@@ -262,4 +274,3 @@ def render_markdown(brief_data: Dict) -> str:
 def render_json(brief_data: Dict) -> str:
     """Render brief data as JSON."""
     return json.dumps(brief_data, indent=2, sort_keys=True)
-

@@ -211,3 +211,7 @@ __marimo__/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Hardstop runtime artifacts
+output/
+run_records/

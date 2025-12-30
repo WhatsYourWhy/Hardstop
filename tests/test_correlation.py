@@ -2,8 +2,13 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from hardstop.alerts.correlation import build_correlation_key
+from hardstop.output.incidents.evidence import (
+    build_incident_evidence_artifact,
+    load_incident_evidence_summary,
+)
 from hardstop.ops.run_record import artifact_hash
 from hardstop.parsing.entity_extractor import EntityLinkingOperator
 from hardstop.parsing.normalizer import CanonicalizeExternalEventOperator
@@ -140,3 +145,72 @@ def test_entity_link_partial_data_fallback(tmp_path):
     assert enriched["lanes"] == []
     assert enriched["shipments"] == []
     assert build_correlation_key(enriched).startswith("SPILL|NONE|NONE")
+
+
+def test_incident_evidence_artifact_matches_fixture(tmp_path):
+    event = {
+        "event_id": "EVT-TEST-001",
+        "title": "Chemical spill at DC-01",
+        "event_type": "SPILL",
+        "facilities": ["DC-01", "PLANT-02"],
+        "lanes": ["LANE-1"],
+        "shipments": [],
+        "event_time_utc": "2024-05-02T00:00:00Z",
+    }
+    existing_alert = SimpleNamespace(
+        alert_id="ALERT-XYZ",
+        correlation_key="SPILL|DC-01|LANE-1",
+        last_seen_utc="2024-04-30T12:00:00Z",
+        scope_json=json.dumps({"facilities": ["DC-01"], "lanes": ["LANE-1"], "shipments": ["SHIP-001"]}),
+        root_event_ids_json=json.dumps(["EVT-OLD-1"]),
+    )
+    artifact, artifact_ref, artifact_path = build_incident_evidence_artifact(
+        alert_id="ALERT-XYZ",
+        event=event,
+        correlation_key="SPILL|DC-01|LANE-1",
+        existing_alert=existing_alert,
+        window_hours=168,
+        dest_dir=tmp_path,
+        generated_at="2024-05-02T00:00:00Z",
+        filename_basename="ALERT-XYZ__EVT-TEST-001__SPILL_DC-01_LANE-1",
+    )
+
+    expected = json.loads(Path("tests/fixtures/incident_evidence_spill.json").read_text(encoding="utf-8"))
+    assert artifact.to_dict() == expected
+    assert artifact_ref.hash == expected["artifact_hash"]
+    assert artifact_path.exists()
+
+
+def test_incident_evidence_summary_loads_latest(tmp_path):
+    event = {
+        "event_id": "EVT-TEST-002",
+        "title": "Follow-on spill update",
+        "event_type": "SPILL",
+        "facilities": ["DC-01"],
+        "lanes": ["LANE-1"],
+        "shipments": [],
+        "event_time_utc": "2024-05-03T00:00:00Z",
+    }
+    existing_alert = SimpleNamespace(
+        alert_id="ALERT-XYZ",
+        correlation_key="SPILL|DC-01|LANE-1",
+        last_seen_utc="2024-05-02T10:00:00Z",
+        scope_json=json.dumps({"facilities": ["DC-01"], "lanes": ["LANE-1"], "shipments": []}),
+        root_event_ids_json=json.dumps(["EVT-OLD-1"]),
+    )
+    build_incident_evidence_artifact(
+        alert_id="ALERT-XYZ",
+        event=event,
+        correlation_key="SPILL|DC-01|LANE-1",
+        existing_alert=existing_alert,
+        window_hours=168,
+        dest_dir=tmp_path,
+        generated_at="2024-05-03T00:00:00Z",
+        filename_basename="ALERT-XYZ__EVT-TEST-002__SPILL_DC-01_LANE-1",
+    )
+
+    summary = load_incident_evidence_summary("ALERT-XYZ", "SPILL|DC-01|LANE-1", dest_dir=tmp_path)
+    assert summary is not None
+    assert "merge_summary" in summary
+    assert summary["inputs"]["alert_id"] == "ALERT-XYZ"
+    assert summary["artifact_hash"]

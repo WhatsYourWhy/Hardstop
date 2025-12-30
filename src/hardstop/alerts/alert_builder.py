@@ -11,10 +11,12 @@ from .alert_models import (
     AlertEvidence,
     AlertImpactAssessment,
     AlertScope,
+    IncidentEvidenceSummary,
     HardstopAlert,
 )
 from .correlation import build_correlation_key
 from .impact_scorer import calculate_network_impact_score, map_score_to_classification
+from ..output.incidents.evidence import build_incident_evidence_artifact
 from ..database.alert_repo import (
     find_recent_alert_by_key,
     update_existing_alert_row,
@@ -176,16 +178,17 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Hardsto
 
     # Correlation: Build key (always - it's a property of the event)
     correlation_key = build_correlation_key(event)
+    existing_alert = None
     
     # Correlation persistence: only when session is available
     # Note: Correlation key is always computed for debugging/replay,
     # but persistence and deduplication require database session
     if session is not None:
-        existing = find_recent_alert_by_key(session, correlation_key, within_days=7)
+        existing_alert = find_recent_alert_by_key(session, correlation_key, within_days=7)
         
-        if existing:
+        if existing_alert:
             # Update existing alert (v0.7: store tier/source_id/trust_tier from latest event)
-            merged_scope_payload = _merge_scope(existing.scope_json, scope_payload)
+            merged_scope_payload = _merge_scope(existing_alert.scope_json, scope_payload)
             scope.facilities = merged_scope_payload.get("facilities", scope.facilities)
             scope.lanes = merged_scope_payload.get("lanes", scope.lanes)
             scope.shipments = merged_scope_payload.get("shipments", scope.shipments)
@@ -194,7 +197,7 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Hardsto
             
             update_existing_alert_row(
                 session,
-                existing,
+                existing_alert,
                 new_summary=summary,
                 new_classification=classification,
                 root_event_id=root_event_id,
@@ -208,12 +211,12 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Hardsto
             session.commit()
             
             # Use existing alert ID and add structured correlation info
-            alert_id = existing.alert_id
+            alert_id = existing_alert.alert_id
             if evidence:
                 evidence.correlation = {
                     "key": correlation_key,
                     "action": "UPDATED",
-                    "alert_id": existing.alert_id,
+                    "alert_id": existing_alert.alert_id,
                 }
                 # Add source metadata if available (v0.7: includes trust_tier)
                 if event.get("source_id"):
@@ -225,7 +228,7 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Hardsto
                         "trust_tier": trust_tier,
                     }
                 evidence.linking_notes = (evidence.linking_notes or []) + [
-                    f"Correlated to existing alert_id={existing.alert_id} via key={correlation_key}"
+                    f"Correlated to existing alert_id={existing_alert.alert_id} via key={correlation_key}"
                 ]
         else:
             # Create new alert
@@ -287,6 +290,27 @@ def build_basic_alert(event: Dict, session: Optional[Session] = None) -> Hardsto
                     "url": event.get("url"),
                     "trust_tier": trust_tier,
                 }
+
+    incident_artifact, incident_ref, incident_path = build_incident_evidence_artifact(
+        alert_id=alert_id,
+        event=event,
+        correlation_key=correlation_key,
+        existing_alert=existing_alert,
+        window_hours=7 * 24,
+        dest_dir="output/incidents",
+        generated_at=event.get("event_time_utc") or event.get("published_at_utc"),
+        filename_basename=f"{alert_id}__{event.get('event_id', 'event')}__{correlation_key.replace('|', '_')}",
+    )
+    if evidence is None:
+        evidence = AlertEvidence()
+    evidence.incident_evidence = IncidentEvidenceSummary(
+        artifact_hash=incident_ref.hash,
+        artifact_path=str(incident_path),
+        merge_reasons=incident_artifact.merge_reasons,
+        merge_summary=incident_artifact.merge_summary,
+        inputs=incident_artifact.inputs,
+    )
+    evidence.linking_notes = _dedupe_preserve_order((evidence.linking_notes or []) + incident_artifact.merge_summary)
 
     return HardstopAlert(
         alert_id=alert_id,
