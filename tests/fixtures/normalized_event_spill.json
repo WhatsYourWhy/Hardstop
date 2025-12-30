@@ -1,0 +1,23 @@
+{
+  "classification_floor": 0,
+  "entities_json": "{\"location\": \"Avon, Indiana\"}",
+  "event_id": "EVT-CANONICAL-0001",
+  "event_payload_json": "{\"type\": \"NEWS\", \"title\": \"Hydrochloric acid spill at Avon chemical plant\", \"body\": \"A spill involving an estimated 5,000 gallons of 37% hydrochloric acid occurred at a manufacturing facility in Avon, Indiana. Operations may be disrupted.\", \"source\": \"LocalNewsNow\", \"event_type\": \"SAFETY_AND_OPERATIONS\", \"severity_guess\": 2}",
+  "event_time_utc": "2024-05-01T00:00:00Z",
+  "event_type": "SPILL",
+  "facilities": [],
+  "lanes": [],
+  "location_hint": "Avon, Indiana",
+  "raw_id": "raw-0001",
+  "raw_text": "Hydrochloric acid spill at Avon chemical plant A spill involving an estimated 5,000 gallons of 37% hydrochloric acid occurred at a manufacturing facility in Avon, Indiana. Operations may be disrupted.",
+  "severity_guess": 1,
+  "shipments": [],
+  "source_id": "demo-source",
+  "source_name": "demo-source",
+  "source_type": "EXTERNAL",
+  "tier": "global",
+  "title": "Hydrochloric acid spill at Avon chemical plant",
+  "trust_tier": 2,
+  "url": "https://example.com/spill",
+  "weighting_bias": 0
+}

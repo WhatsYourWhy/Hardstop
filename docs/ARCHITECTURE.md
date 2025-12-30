@@ -169,6 +169,7 @@ Hardstop enforces bounded causal radius to avoid “firehose” behavior:
 | Artifact Layer | `hardstop/database/*`, `hardstop/ops/run_status.py` | SQLite store, migrations, run evaluation, provenance. |
 
 When adding new modules, declare their taxonomy tier and the artifact types they read/write so operators remain composable.
+Canonicalization operator inputs/outputs and hashing rules are described in detail in [`docs/specs/canonicalization.md`](specs/canonicalization.md).
 
 ---
 
