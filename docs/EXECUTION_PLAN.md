@@ -99,32 +99,28 @@ foundational dependencies to user-facing integrations.
 - **Failure budget automation**: wire the health data into `hardstop doctor`
   so unhealthy sources block progression to downstream phases when appropriate.
 
-#### P1 Execution Next Steps (Active)
+#### P1 Retrospective (Shipped in v1.1.0)
+
+- **Health score + budget states live**: `hardstop/ops/source_health.py` now emits deterministic scores and `health_budget_state` values (`HEALTHY`, `WATCH`, `BLOCKED`), surfaced in `hardstop sources health` and the API response for sources.
+- **Suppression summaries and explain flag**: `hardstop/database/raw_item_repo.py` captures suppression reason counts, and `hardstop sources health --explain-suppress <source>` returns deterministic samples so operators can tune noisy rules.
+- **Failure-budget gating**: `hardstop/ops/run_status.py` and `hardstop/cli.py` apply failure-budget blockers to exit codes (strict mode escalates warnings to exit code 2) so unhealthy sources halt downstream work.
+
+#### P1 Execution Next Steps (Residual)
 
 1. **Canonical source registry + tier defaults**
    - Produce a documented schema (lightweight spec doc + example YAML) that folds trust tier weighting, classification floors, weighting bias, and suppression overrides into a single source definition. Reference files: `config/sources.yaml`, `config/sources.example.yaml`, and `hardstop/config/loader.py`.
    - Update the loader so every CLI path (`hardstop sources list|health|test`) consumes the same normalized object. Add regression coverage in `tests/test_cli_sources.py` for tier defaults and schema validation errors.
    - *Exit criteria:* configuration diffs for a tier flip only change the trust tier field; health commands show tier + weighting bias without additional plumbing.
 
-2. **Persisted health telemetry + scoring math**
+2. **Persisted health telemetry**
    - Extend `hardstop/database/source_run_repo.py` to store fetch success ratios, bytes pulled, suppression hit count, and rolling stale timers per source. Emit the metrics from adapters via `hardstop/retrieval/fetcher.py`.
-   - Refresh the `hardstop sources health` CLI output to surface the stored metrics plus a derived health score (0-100). Tests in `tests/test_source_health.py` and `tests/test_source_health_integration.py` should pin the scoring math.
+   - Keep the scoring math pinned in `tests/test_source_health.py` and `tests/test_source_health_integration.py` to ensure deterministic aggregates when telemetry is replayed.
    - *Exit criteria:* rerunning `hardstop run` twice with identical inputs produces deterministic SourceRun rows whose aggregates are rendered in the health table without recomputing from scratch.
 
 3. **Adapter diagnostics contract**
    - Define the required diagnostics envelope (HTTP status, bytes pulled, dedupe count, suppression hits) in this doc and mirror it in `docs/ARCHITECTURE.md`. Implement the logging in `hardstop/retrieval/adapters.py` and persist via `hardstop/database/raw_item_repo.py`.
    - Add pytest helpers so every adapter test asserts the diagnostics payload shape. Start with RSS + NWS fixtures in `tests/test_source_health*.py`.
    - *Exit criteria:* failing to emit diagnostics fails CI with a clear assertion instead of silently degrading observability.
-
-4. **Suppression observability + CLI affordances**
-   - Have `hardstop/suppression/engine.py` emit structured reason codes for every suppression decision and persist them alongside SourceRuns so they trend with other health metrics.
-   - Document and ship `--explain-suppress` (already stubbed in the CLI help) so operators can inspect the raw events that were muted plus the rules responsible. Update CLI docs + README usage snippets.
-   - *Exit criteria:* `hardstop sources health --explain-suppress <source>` (or the ingest CLI flag) prints deterministic suppression samples with rule ids + counts, and the data feeds the health score calculations above.
-
-5. **Failure budget automation in doctor/run-status**
-   - Plumb the health score + suppression analytics into `hardstop doctor` and the run-status footer (`hardstop/ops/run_status.py`) so unhealthy sources can block downstream phases when strict mode is enabled.
-   - Encode the gating logic in `tests/test_source_health_integration.py` and `tests/test_run_status.py` by simulating degraded sources and asserting the correct exit codes + doctor recommendations.
-   - *Exit criteria:* CI (or a developer) running `hardstop doctor` immediately sees a blocking recommendation when the rolling failure budget is exhausted; strict-mode `hardstop run` exits with code 2 in the same scenario.
 
 ### P2 – Decision Core & Artifact Quality
 
@@ -172,8 +168,11 @@ foundational dependencies to user-facing integrations.
 
 - P0 tasks complete and locked by regression tests (RunRecord schema + config
   fingerprints, strict/best-effort exit codes, golden-run fixtures).
-- P1 groundwork in place via `hardstop sources health` but lacks suppression
-  analytics and failure budgets.
+- P1 health scoring, suppression explainability, and failure-budget gating are
+  live (`hardstop/ops/source_health.py`, `hardstop/database/raw_item_repo.py`,
+  `hardstop/ops/run_status.py`, `hardstop/cli.py`); remaining work centers on
+  the canonical source registry, persisted telemetry plumbing, and the adapter
+  diagnostics contract.
 - P2 correlation evidence and replay tooling not yet implemented.
 - P3 integrations rely on ad-hoc scripts; no export bundle spec.
 

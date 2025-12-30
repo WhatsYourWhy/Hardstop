@@ -251,6 +251,10 @@ to architectural dependencies:
 Revisit the roadmap alongside the execution plan every release cycle; updates
 must land in README, this document, and the execution plan simultaneously.
 
+For contributor kickoff on P2 workstreams (canonicalization v2, impact scoring
+transparency, correlation evidence, replay CLI), see `docs/P2_READINESS.md` for
+current-state notes and acceptance criteria mapped to code paths.
+
 ---
 
 ## Implementation Notes (Pragmatic Defaults)

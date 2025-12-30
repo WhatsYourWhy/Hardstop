@@ -1,21 +1,18 @@
 # Changelog
 
-## [1.1.0] - 2025-XX-XX
+## [1.1.0] - 2025-02-15
 
-### Added
-- Canonical source registry with tier defaults
-  - `tier_defaults` section folds trust tier, classification floor, and weighting bias per tier
-  - Loader normalizes every source so CLI paths share the same schema
-- Adapter diagnostics + fetch telemetry
-  - RSS/NWS/FEMA adapters report HTTP status and bytes downloaded
-  - `FetchResult` now captures `bytes_downloaded` for deterministic audit trails
+### Added (shipped)
 - Structured source health scoring
-  - New health score (0-100) plus failure-budget states (`HEALTHY`, `WATCH`, `BLOCKED`)
-  - `hardstop sources health` surfaces scores, failure streaks, and suppression ratios
-  - `hardstop doctor` and `hardstop run --strict` gate on exhausted budgets
+  - Health score (0-100) plus failure-budget states (`HEALTHY`, `WATCH`, `BLOCKED`)
+  - `hardstop sources health` surfaces scores, failure streaks, suppression ratios, and `suppression_pct`
+  - Sources API returns `health_budget_state` so integrators can consume the same signal
 - Suppression observability
-  - Every suppression decision records a stable reason code
+  - Suppression decisions record stable reason codes and counts
   - `hardstop sources health --explain-suppress <id>` prints reason counts with deterministic samples
+- Failure-budget automation
+  - `hardstop doctor` and `hardstop run --strict` gate on exhausted budgets
+  - Run status footer reflects budget state for quick triage
 - Database diagnostics
   - `source_runs.diagnostics_json` stores fetch/ingest envelopes (bytes, dedupe, suppression reasons)
   - Raw items/events include `suppression_reason_code` for trend queries
@@ -27,11 +24,10 @@
 - Doctor command now reports failure-budget warnings/blockers alongside stale counts
 - `hardstop fetch` default `--max-items-per-source` is now 10 (was 50) to stay aligned with README
 
-### Technical
-- New helper `hardstop.ops.source_health.compute_health_score`
-- `hardstop.config.loader` normalization utilities with tier-aware defaults
-- `summarize_suppression_reasons()` helper for CLI explain output
-- Tests cover health scoring, suppression summaries, and failure-budget gating
+### Planned follow-ups
+- Canonical source registry with tier defaults (`hardstop.config.loader`, `config/sources*.yaml`)
+- Adapter diagnostics + fetch telemetry contract for all adapters
+- Scoring math pinned to persisted telemetry once adapters emit the enriched envelopes
 # Changelog
 
 ## [1.0.0] - 2024-XX-XX
@@ -325,4 +321,3 @@
 - Alert generation with heuristic-based scoring
 - Local SQLite storage
 - Demo pipeline
-

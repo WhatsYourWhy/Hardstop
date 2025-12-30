@@ -156,6 +156,29 @@ hardstop sources health
 
 # Test a specific source
 hardstop sources test <source_id> --since 72h
+
+### Source health outputs and suppression explain
+
+`hardstop sources health` now emits richer diagnostics so you can interpret why a source is healthy or blocked:
+
+- **Columns**: `score` (0-100), `health_budget_state` (`HEALTHY`, `WATCH`, `BLOCKED`), `suppression_pct` (percentage of items suppressed), plus fetch/ingest stats per source.
+- **Semantics**: `HEALTHY` means the rolling failure budget is intact, `WATCH` signals the budget is nearing exhaustion, and `BLOCKED` prevents downstream phases (strict runs exit 2).
+- **API parity**: The sources API (`src/hardstop/api/sources_api.py`) returns `health_budget_state` alongside each source so integrations can react to the same gating logic.
+
+Explain suppression decisions with deterministic samples:
+
+```bash
+# Show suppression reasons and sample items for a source
+hardstop sources health --explain-suppress <source_id>
+
+# Example output
+# suppression_reasons:
+#   RULE-001: 3 (title contains "test")
+#   RULE-007: 1 (facility mismatch)
+# samples:
+#   RAW-123 -> RULE-001 ("test outage")
+#   RAW-129 -> RULE-007 ("facility=PLANT-99 outside scope")
+```
 ```
 
 ## Usage

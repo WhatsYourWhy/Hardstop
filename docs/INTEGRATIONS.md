@@ -2,6 +2,12 @@
 
 Hardstop is intentionally local-first, but it plays well with the rest of your product stack. Use this guide to connect Hardstop runs to collaboration, code, and automation tools so alerts stay in sync with how your team works.
 
+## Source health outputs for integrations
+
+- The `hardstop sources health` table emits `score`, `health_budget_state` (`HEALTHY`, `WATCH`, `BLOCKED`), and `suppression_pct` columns so schedulers or monitors can react to degraded sources.
+- The sources API (`src/hardstop/api/sources_api.py`) returns `health_budget_state` for each source; downstream consumers can mirror the CLI gating logic in dashboards or alerting rules.
+- To audit noisy rules, run `hardstop sources health --explain-suppress <source_id>` and capture the reason counts + samples as an attachment in your observability tool.
+
 ## Slack
 
 Use Slack to broadcast risk alerts and daily briefs.
