@@ -1,72 +1,70 @@
-# P2 Readiness Kickoff
+# P2 Readiness (Delivered Baseline)
 
-This note maps the P2 execution items from `docs/EXECUTION_PLAN.md` to concrete
-code paths and acceptance criteria so contributors can start implementation
-quickly. P1 health scoring, suppression explainability, and failure-budget
-gating are complete (see `hardstop/ops/source_health.py`,
-`hardstop/database/raw_item_repo.py`, and `hardstop/ops/run_status.py`), so this
-doc starts from that baseline before enumerating P2 work.
+This note now documents the shipped P2 scope from `docs/EXECUTION_PLAN.md`,
+linking the live code paths, regression coverage, and acceptance criteria we
+maintain going forward. P1 health scoring, suppression explainability, and
+failure-budget gating remain in steady state (see
+`hardstop/ops/source_health.py`, `hardstop/database/raw_item_repo.py`, and
+`hardstop/ops/run_status.py`). The sections below ensure P2 features stay
+regression-tested while contributors extend or maintain the decision core.
 
 ## Canonicalization v2 (src/hardstop/parsing/*)
 
-- **Current state:** Normalization and entity extraction live in
-  `src/hardstop/parsing/normalizer.py` and `src/hardstop/parsing/entity_extractor.py`
-  but are coupled to downstream steps and lack explicit operator boundaries.
-- **Acceptance criteria:**
-  - Canonicalization operators declare inputs/outputs and emit RunRecords (extend
-    provenance expectations documented in `docs/ARCHITECTURE.md` and
-    `docs/specs/run-record.schema.json`).
-  - Entity linking handles partial data gracefully with deterministic fallbacks
-    aligned to the canonicalization spec to be expanded in `docs/specs/`.
-  - Tests pin canonical payload hashes for representative sources using
-    `tests/fixtures/*.json|.csv` and add deterministic regressions to
-    `tests/test_correlation.py` and `tests/test_golden_run.py`.
+- **Status:** Delivered. `CanonicalizeExternalEventOperator` and
+  `EntityLinkingOperator` emit RunRecords, normalize fixtures from `tests/fixtures/`,
+  and provide deterministic fallbacks for partial data before correlation.
+- **Maintenance checklist / acceptance mapping:**
+  - Keep operator input/output contracts aligned with `docs/ARCHITECTURE.md` and
+    `docs/specs/run-record.schema.json`; emit RunRecords for every execution.
+  - Preserve deterministic hashing of canonical payloads; update fixtures +
+    schema docs when canonical fields evolve.
+  - Ensure partial data paths remain deterministic (empty facilities/lanes/shipments).
+- **Regression coverage:** `tests/test_correlation.py`,
+  `tests/test_golden_run.py`, and fixture SHA checks under `tests/fixtures/normalized_event_spill.json`.
 
 ## Impact scoring transparency (src/hardstop/alerts/*)
 
-- **Current state:** `src/hardstop/alerts/impact_scorer.py` computes scores with
-  trust-tier modifiers but rationale details are not persisted in a stable,
-  inspectable format.
-- **Acceptance criteria:**
-  - Persist rationale (trust-tier modifiers, network criticality, suppression context)
-    alongside each scored alert/incident.
-  - Regression tests in `tests/test_impact_scorer.py` pin rationale fields and
-    ensure deterministic scoring deltas; refresh golden expectations under
-    `tests/fixtures/` when rationale changes.
-  - Document the rationale payload in `docs/ARCHITECTURE.md` and keep the
-    scoring section synchronized with `docs/EXECUTION_PLAN.md` when modifiers
-    evolve.
+- **Status:** Delivered. `hardstop/alerts/impact_scorer.py` persists rationale
+  envelopes (network criticality, trust-tier modifiers, suppression context) and
+  surfaces them via `AlertEvidence`.
+- **Maintenance checklist / acceptance mapping:**
+  - Keep rationale payload structure synchronized with `docs/ARCHITECTURE.md`,
+    `docs/EXECUTION_PLAN.md`, and any downstream consumers (brief/export APIs).
+  - Refresh fixtures/tests whenever scoring modifiers or keyword rules change to
+    avoid silent drift in deterministic deltas.
+  - Ensure suppression context continues to copy deterministic metadata from
+    events (status, rule ids, reason codes).
+- **Regression coverage:** `tests/test_impact_scorer.py`,
+  `tests/test_demo_pipeline.py`, `tests/test_golden_run.py`.
 
 ## Correlation evidence graph (src/hardstop/output/incidents/*)
 
-- **Current state:** Incident correlation emits merged incidents but does not
-  store evidence describing *why* events merged (temporal overlap, shared
-  facilities, correlation keys).
-- **Acceptance criteria:**
-  - Introduce correlation evidence artifacts under `src/hardstop/output/incidents/`
-    that enumerate merge reasons and inputs.
-  - Briefs and export paths surface evidence summaries for analyst audit.
-  - Tests validate evidence capture for overlapping events and for negative cases
-    (no merge when evidence is insufficient) using deterministic fixtures in
-    `tests/fixtures/` plus regressions in `tests/test_correlation.py` and
-    `tests/test_output_renderer_only.py`.
-  - Keep evidence schema aligned with `docs/ARCHITECTURE.md` decision artifact
-    sections and any incident schema notes in `docs/specs/run-record.schema.json`.
+- **Status:** Delivered. `hardstop/output/incidents/evidence.py` stores merge
+  reasons (temporal overlap, shared facilities/lanes, root-event history) and
+  surfaces summaries to briefs/export APIs.
+- **Maintenance checklist / acceptance mapping:**
+  - Keep evidence schema mirrored in `docs/ARCHITECTURE.md` and
+    `docs/specs/run-record.schema.json`, updating fixtures whenever fields evolve.
+  - Maintain deterministic artifact hashing + filename conventions so `AlertEvidence`
+    consumers remain replayable.
+  - Ensure new merge heuristics also emit evidence entries and regression tests.
+- **Regression coverage:** `tests/test_correlation.py`,
+  `tests/test_output_renderer_only.py`, fixtures under
+  `tests/fixtures/incident_evidence_spill.json`.
 
 ## Incident replay CLI (src/hardstop/cli.py)
 
-- **Current state:** CLI stubs exist for replay but no end-to-end path is wired.
-- **Acceptance criteria:**
-  - Implement `hardstop incidents replay <incident_id>` to re-materialize inputs
-    and confirm determinate outputs using recorded RunRecords and artifacts.
-  - Replay supports pinned timestamps/ids for determinism and requires
-    `RunRecord` provenance plus stored artifacts (including correlation evidence)
-    and the resolved config fingerprint hash to be present before execution.
-  - Replay honors strict vs best-effort: strict mode fails deterministically if
-    any input artifact or RunRecord is missing, while best-effort surfaces
-    warnings but continues.
-  - Tests cover a happy-path replay and deterministic failure modes when
-    artifacts are missing, anchored in `tests/test_run_record.py`,
-    `tests/test_golden_run.py`, and new replay-specific cases under
-    `tests/test_output_renderer_only.py` or a dedicated `tests/output/`
-    namespace.
+- **Status:** Delivered. `hardstop incidents replay <incident_id>` re-materializes
+  artifacts + RunRecords via `hardstop.incidents.replay@1.0.0` and enforces
+  strict/best-effort semantics aligned with P0 provenance rules.
+- **Maintenance checklist / acceptance mapping:**
+  - Keep CLI + `hardstop/cli.py` args aligned with artifact directory layouts
+    (`output/incidents`, `run_records/`) and ensure new artifact kinds wire into
+    the replay envelope.
+  - Maintain strict-mode failure behavior when dependencies are missing while
+    surfacing actionable diagnostics in best-effort mode.
+  - Ensure replay emits fresh RunRecords with fingerprints that match the current
+    config snapshot (see `hardstop/ops/run_record.py` helpers).
+- **Regression coverage:** `tests/test_run_record.py` (replay smoke test +
+  schema validation), `tests/test_golden_run.py`, `tests/test_demo_pipeline.py`,
+  and any CLI-focused suites covering failure modes.
