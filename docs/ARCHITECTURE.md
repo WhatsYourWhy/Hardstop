@@ -251,29 +251,23 @@ Tests for adapters/operators should run in strict mode with pinned dependencies 
 
 The execution priorities are described in detail in
 [`docs/EXECUTION_PLAN.md`](EXECUTION_PLAN.md). Each priority band maps directly
-to architectural dependencies:
+to architectural dependencies and current delivery status:
 
-- **P0 – Deterministic kernel hardening**  
-  Close RunRecord coverage gaps, fingerprint merged configs, enforce
-  strict/best-effort modes, and ship golden-run fixtures so every operator is
-  replayable.
-- **P1 – Source reliability & health**  
-  Normalize source schemas, expose tier-aware health scores, surface suppression
-  analytics, and make `hardstop doctor` block downstream phases when sources are
-  unhealthy.
-- **P2 – Decision core & artifact quality**  
-  Refactor canonicalization, capture scoring rationale, persist correlation
-  evidence, and add an incident replay CLI to validate provenance.
-- **P3 – Reporting & integrations**  
-  Upgrade briefs/exports to the new artifact schema, publish read-only bundles,
-  and wire deterministic run outputs into Slack/Linear/CI sinks.
+- **P0 – Deterministic kernel hardening (Delivered)**  
+  RunRecord coverage, config fingerprinting, strict/best-effort enforcement, and golden-run fixtures are regression-locked so every operator is replayable before higher tiers ship.
+- **P1 – Source reliability & health (Delivered)**  
+  Canonical source schemas, tier-aware health scores, suppression analytics, and `hardstop doctor` failure-budget gating are live with persisted `SourceRun` telemetry and CLI coverage.
+- **P2 – Decision core & artifact quality (Delivered, maintenance mode)**  
+  Canonicalization v2, scoring rationale payloads, correlation evidence artifacts, and the incident replay CLI close the loop on replayable decisions; updates now focus on maintenance aligned with `docs/P2_READINESS.md`.
+- **P3 – Reporting & integrations (Next up)**  
+  Brief/export upgrades, deterministic bundles, and Slack/Linear/CI sinks remain open and depend on the stable artifacts from P2.
 
 Revisit the roadmap alongside the execution plan every release cycle; updates
 must land in README, this document, and the execution plan simultaneously.
 
-For contributor kickoff on P2 workstreams (canonicalization v2, impact scoring
-transparency, correlation evidence, replay CLI), see `docs/P2_READINESS.md` for
-current-state notes and acceptance criteria mapped to code paths.
+For maintenance of the shipped P2 scope (canonicalization v2, impact scoring
+transparency, correlation evidence, replay CLI), use `docs/P2_READINESS.md` as
+the acceptance-mapping reference to keep code paths and regression suites aligned.
 
 ---
 

@@ -36,6 +36,7 @@ foundational dependencies to user-facing integrations.
 ## Detailed Execution Steps
 
 ### P0 – Deterministic Kernel Hardening
+_Status: Delivered and regression-locked (Dec 2025)._
 
 - **RunRecord coverage**: extend `tests/test_run_status.py` and `hardstop/ops/*`
   to ensure every operator writes `input_refs`, `output_refs`, config hashes,
@@ -84,6 +85,7 @@ foundational dependencies to user-facing integrations.
 - Golden fixture digests remain stable because nondeterministic fields are normalized.
 
 ### P1 – Source Reliability & Health
+_Status: Delivered with tier-aware health telemetry and suppression auditing (Dec 2025)._
 
 - **Source registry revamp**: move source definitions into a canonical schema
   with per-tier defaults (trust tier weighting, classification floor, max
@@ -105,38 +107,41 @@ foundational dependencies to user-facing integrations.
 - **Suppression summaries and explain flag**: `hardstop/database/raw_item_repo.py` captures suppression reason counts, and `hardstop sources health --explain-suppress <source>` returns deterministic samples so operators can tune noisy rules.
 - **Failure-budget gating**: `hardstop/ops/run_status.py` and `hardstop/cli.py` apply failure-budget blockers to exit codes (strict mode escalates warnings to exit code 2) so unhealthy sources halt downstream work.
 
-#### P1 Execution Next Steps (Residual)
+#### P1 Verification (Dec 2025)
+
+- `tests/test_source_health.py` and `tests/test_source_health_integration.py` pin deterministic scoring math, persisted `SourceRun` telemetry, and failure-budget gating via `hardstop/ops/source_health.py` + `hardstop/database/source_run_repo.py`.
+- `tests/test_cli_sources.py` ensures the canonical source registry + tier defaults emitted by `hardstop/config/loader.py` surface consistent weighting bias, suppression overrides, and schema validation errors across every CLI surface (`hardstop sources list|health|test`).
+- `tests/test_suppression_engine.py` and `tests/test_suppression_integration.py` lock the suppression explainability envelope so adapters emitting diagnostics via `hardstop/retrieval/{fetcher,adapters}.py` produce actionable summaries.
+
+#### P1 Maintenance Hooks (Ongoing)
 
 1. **Canonical source registry + tier defaults**
-   - Produce a documented schema (lightweight spec doc + example YAML) that folds trust tier weighting, classification floors, weighting bias, and suppression overrides into a single source definition. Reference files: `config/sources.yaml`, `config/sources.example.yaml`, and `hardstop/config/loader.py`.
-   - Update the loader so every CLI path (`hardstop sources list|health|test`) consumes the same normalized object. Add regression coverage in `tests/test_cli_sources.py` for tier defaults and schema validation errors.
-   - *Exit criteria:* configuration diffs for a tier flip only change the trust tier field; health commands show tier + weighting bias without additional plumbing.
+   - Keep the documented schema + YAML examples in `config/sources*.yaml` synchronized with `docs/ARCHITECTURE.md`, and ensure loader updates continue to flow through every CLI entry point.
+   - Review regression coverage in `tests/test_cli_sources.py` whenever tier defaults or schema validation behaviors change so configuration diffs remain minimal and deterministic.
 
 2. **Persisted health telemetry**
-   - Extend `hardstop/database/source_run_repo.py` to store fetch success ratios, bytes pulled, suppression hit count, and rolling stale timers per source. Emit the metrics from adapters via `hardstop/retrieval/fetcher.py`.
-   - Keep the scoring math pinned in `tests/test_source_health.py` and `tests/test_source_health_integration.py` to ensure deterministic aggregates when telemetry is replayed.
-   - *Exit criteria:* rerunning `hardstop run` twice with identical inputs produces deterministic SourceRun rows whose aggregates are rendered in the health table without recomputing from scratch.
+   - Continue evolving `hardstop/database/source_run_repo.py` + `hardstop/retrieval/fetcher.py` to store new metrics without breaking deterministic aggregates; extend `tests/test_source_health*.py` accordingly.
+   - Re-run `hardstop run` in CI with identical inputs to confirm SourceRun rows render deterministically in the health tables before shipping telemetry schema changes.
 
 3. **Adapter diagnostics contract**
-   - Define the required diagnostics envelope (HTTP status, bytes pulled, dedupe count, suppression hits) in this doc and mirror it in `docs/ARCHITECTURE.md`. Implement the logging in `hardstop/retrieval/adapters.py` and persist via `hardstop/database/raw_item_repo.py`.
-   - Add pytest helpers so every adapter test asserts the diagnostics payload shape. Start with RSS + NWS fixtures in `tests/test_source_health*.py`.
-   - *Exit criteria:* failing to emit diagnostics fails CI with a clear assertion instead of silently degrading observability.
+   - Maintain the diagnostics envelope (HTTP status, bytes pulled, dedupe count, suppression hits) mirrored between this doc and `hardstop/retrieval/adapters.py` / `hardstop/database/raw_item_repo.py`.
+   - Expand pytest helpers + fixtures under `tests/test_source_health*.py` whenever new adapter surfaces or diagnostics fields are added so CI continues to fail fast on contract drift.
 
 ### P2 – Decision Core & Artifact Quality
+_Status: Delivered with deterministic evidence + replay coverage (Jan 2026)._
 
-- **Canonicalization v2**: consolidate normalization and entity extraction into
-  explicit operators with declared inputs/outputs. Ensure entity linking
-  gracefully handles partial data.
-- **Impact scoring transparency**: document and persist rationale including
-  trust-tier modifiers, network criticality, and suppression context. Rationale
-  payloads are pinned in `tests/test_impact_scorer.py` and surfaced via
-  `AlertEvidence.diagnostics.impact_score_rationale` for deterministic replay.
-- **Correlation evidence graph**: expand incident correlation to store why
-  events merged (temporal overlap, shared facilities) so analysts can audit.
-- **Incident replay CLI**: add `hardstop incidents replay <incident_id>` to
-  re-materialize inputs and confirm determinate outputs.
-- **Artifact schema updates**: refresh `docs/specs/run-record.schema.json` and
-  related SQLite migrations to match the richer incident + decision artifacts.
+- **Canonicalization v2**: `hardstop/parsing/normalizer.py` and `hardstop/parsing/entity_extractor.py` now run as explicit operators, emit RunRecords, and normalize fixtures from `tests/fixtures/` with deterministic fallbacks for partial data.
+- **Impact scoring transparency**: `hardstop/alerts/impact_scorer.py` persists rationale envelopes (trust-tier modifiers, network criticality, suppression context) exposed through `AlertEvidence.diagnostics.impact_score_rationale` and consumption paths in briefs/exporters.
+- **Correlation evidence graph**: `hardstop/output/incidents/evidence.py` emits audit-ready artifacts explaining every merge (temporal overlap, shared facilities/lanes) with hashed payloads referenced by alerts and briefs.
+- **Incident replay CLI**: `hardstop cli incidents replay` replays incidents from stored artifacts/RunRecords via `hardstop.incidents.replay@1.0.0`, enforcing strict/best-effort semantics before broadcasting artifacts.
+- **Artifact schema updates**: `docs/specs/run-record.schema.json`, `hardstop/ops/run_record.py`, and the SQLite migrations now mirror the richer incident + decision metadata consumed by replay, scoring, and export surfaces.
+
+#### P2 Verification (Jan 2026)
+
+- Canonicalization + entity-linking hashes are pinned via fixture comparisons in `tests/test_correlation.py`, ensuring `CanonicalizeExternalEventOperator` output matches `tests/fixtures/normalized_event_spill.json`.
+- Impact scoring rationale payloads and modifier deltas are regression-tested in `tests/test_impact_scorer.py`, keeping trust-tier, weighting bias, and suppression context deterministic.
+- Incident evidence artifacts + summaries are validated against `tests/fixtures/incident_evidence_spill.json` and replay smoke-tests in `tests/test_run_record.py`, guaranteeing `hardstop incidents replay` emits schema-valid RunRecords and artifact hashes.
+- Golden-run + demo pipeline suites (`tests/test_golden_run.py`, `tests/test_demo_pipeline.py`, `tests/test_output_renderer_only.py`) assert that decision-core artifacts remain stable when canonicalization, scoring, correlation, evidence, and replay paths run together.
 
 ### P3 – Reporting, Export, and Integrations
 
@@ -165,17 +170,12 @@ foundational dependencies to user-facing integrations.
 
 ---
 
-## Current Status Snapshot (Dec 2025)
+## Current Status Snapshot (Jan 2026)
 
-- P0 tasks complete and locked by regression tests (RunRecord schema + config
-  fingerprints, strict/best-effort exit codes, golden-run fixtures).
-- P1 health scoring, suppression explainability, and failure-budget gating are
-  live (`hardstop/ops/source_health.py`, `hardstop/database/raw_item_repo.py`,
-  `hardstop/ops/run_status.py`, `hardstop/cli.py`); remaining work centers on
-  the canonical source registry, persisted telemetry plumbing, and the adapter
-  diagnostics contract.
-- P2 correlation evidence and replay tooling not yet implemented.
-- P3 integrations rely on ad-hoc scripts; no export bundle spec.
+- **P0** deterministic kernel hardening remains regression-locked via RunRecord schema + config fingerprinting suites; `hardstop doctor` and golden fixtures continue to gate releases.
+- **P1** source health, suppression explainability, canonical registry plumbing, and adapter diagnostics are shipped with persisted telemetry + CLI coverage, shifting focus to maintenance and telemetry tuning.
+- **P2** canonicalization v2, scoring rationale, correlation evidence artifacts, and the incident replay CLI are delivered with end-to-end replay + artifact regression tests.
+- **P3** reporting/export/CI integrations remain the next frontier; daily briefs and export bundle specs still rely on ad-hoc scripts awaiting prioritization.
 
 This plan should be revisited at the end of every release cycle to confirm
 assumptions, retire completed work, and reprioritize based on new risks.
