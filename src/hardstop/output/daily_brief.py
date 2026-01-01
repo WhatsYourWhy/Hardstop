@@ -66,7 +66,9 @@ def render_markdown(brief_data: Dict) -> str:
     
     # Counts
     counts = brief_data["counts"]
-    tier_counts = brief_data.get("tier_counts", {"global": 0, "regional": 0, "local": 0})
+    tier_counts = brief_data.get(
+        "tier_counts", {"global": 0, "regional": 0, "local": 0, "unknown": 0}
+    )
     lines.append("## Summary")
     lines.append("")
     lines.append(f"- **New:** {counts['new']} | **Updated:** {counts['updated']}")
@@ -76,13 +78,13 @@ def render_markdown(brief_data: Dict) -> str:
         f"**Interesting (0):** {counts['interesting']}"
     )
     tier_summary_parts = []
-    if tier_counts['global'] > 0:
+    if tier_counts.get("global", 0) > 0:
         tier_summary_parts.append(f"Global {tier_counts['global']}")
-    if tier_counts['regional'] > 0:
+    if tier_counts.get("regional", 0) > 0:
         tier_summary_parts.append(f"Regional {tier_counts['regional']}")
-    if tier_counts['local'] > 0:
+    if tier_counts.get("local", 0) > 0:
         tier_summary_parts.append(f"Local {tier_counts['local']}")
-    if tier_counts['unknown'] > 0:
+    if tier_counts.get("unknown", 0) > 0:
         tier_summary_parts.append(f"Unknown {tier_counts['unknown']}")
     
     if tier_summary_parts:
