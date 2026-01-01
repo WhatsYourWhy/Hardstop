@@ -157,7 +157,7 @@ hardstop sources health
 # Test a specific source
 hardstop sources test <source_id> --since 72h
 
-### Source health outputs and suppression explain
+### Source health outputs and suppression explanations
 
 `hardstop sources health` now emits richer diagnostics so you can interpret why a source is healthy or blocked:
 
