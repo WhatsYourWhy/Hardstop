@@ -145,17 +145,11 @@ _Status: Delivered with deterministic evidence + replay coverage (Jan 2026)._
 
 ### P3 – Reporting, Export, and Integrations
 
-- **Brief v2**: restructure Markdown/JSON briefs to consume the new artifacts,
-  add badges for trust tiers, and expose suppression rationale for each alert.
-- **Export API / bundles**: deliver read-only exports (JSON bundle + CSV) so
-  downstream tools can ingest Hardstop outputs without touching the DB.
-- **Chat & work tracker sinks**: document Slack webhook + Linear issue mirroring
-  flows with deterministic retry logic; integrations should read from exported
-  artifacts instead of live DB queries.
-- **CI/CD hooks**: publish a reference GitHub Actions workflow that runs
-  `hardstop run`, `hardstop doctor`, and surfaces exit codes/status summaries.
-- **Operational playbooks**: document runbooks for remediation when sources or
-  operators fail, tying back to health metrics emitted in earlier phases.
+- **Brief v2 (brief.v2 spec)**: ship Markdown/JSON renderers backed by the brief v2 schema (see `docs/specs/brief-v2.md`), surface trust tiers, evidence summaries (`merge_summary`/`artifact_hash`), suppression rollups, and provenance where available.
+- **Export API / bundles**: deliver read-only exports (JSON bundle + optional CSV) derived from the brief read model; include incident evidence hashes and optional source health snapshot. Support `filename_basename` for deterministic filenames.
+- **Chat & work tracker sinks**: document Slack webhook + Linear mirroring flows with canonical payload examples (counts, top impact with correlation keys, evidence hash). Integrations must consume exports/brief JSON, not DB queries.
+- **CI/CD hooks**: publish a reference GitHub Actions workflow that runs `hardstop run`, `hardstop doctor`, and uploads brief/export artifacts; gate on exit codes (0 healthy, 1 warning, 2 broken).
+- **Operational playbooks**: add reporting/export runbooks covering blocked sources, replay/export failures, and remediation using health metrics and RunRecords.
 
 ---
 

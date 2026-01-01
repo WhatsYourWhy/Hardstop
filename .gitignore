@@ -215,3 +215,5 @@ Thumbs.db
 # Hardstop runtime artifacts
 output/
 run_records/
+!src/hardstop/output/
+!src/hardstop/output/README.md

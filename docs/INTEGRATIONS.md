@@ -14,10 +14,25 @@ Use Slack to broadcast risk alerts and daily briefs.
 
 - **Recommended flow:**
   1) Create an *Incoming Webhook* in Slack and pick a channel for alerts.
-  2) Run `hardstop brief --today --format json > /tmp/brief.json` after each pipeline run.
-  3) Post highlights to Slack with a small script:
-     - Render a short summary (counts, top impacts) from `/tmp/brief.json`.
-     - Send it to the webhook URL as a JSON payload.
+  2) Run `hardstop brief --today --format json > /tmp/brief.json` (or use the export bundle from brief v2).
+  3) Post highlights with a small script:
+     - Summary payload example:
+       ```json
+       {
+         "text": "*Hardstop Daily Brief* (since 24h)",
+         "attachments": [
+           {
+             "title": "Counts",
+             "text": "New: 3 | Updated: 2 | Impactful: 2 | Relevant: 1 | Interesting: 2"
+           },
+           {
+             "title": "Top impact",
+             "text": "[G][T3] {summary}\nKey: {correlation.key}\nScope: Facilities {facilities} | Lanes {lanes}\nEvidence: {artifact_hash_or_summary}"
+           }
+         ]
+       }
+       ```
+     - Use `correlation.key` for threads; include `artifact_hash` (if present) for traceability.
   4) Add the script to your scheduler (cron, systemd timer, GitHub Action) so Slack stays current.
 - **Threading:** Use the alert `correlation.key` as a thread root to keep updates grouped.
 - **Rate limiting:** Batch multiple updates into one post per run to avoid noisy channels.
@@ -54,10 +69,18 @@ To mirror high-impact alerts into Linear:
 
 1) Create a Linear API key with access to the target team.
 2) Map Hardstop classifications to Linear priority (e.g., class 2 → P1, class 1 → P2).
-3) Script a small bridge:
-   - Query `hardstop brief --today --format json`.
+3) Script a small bridge (brief v2/export bundle recommended):
+   - Query `hardstop brief --today --format json` or parse the export bundle.
    - For each `top` alert, upsert a Linear issue keyed by `correlation.key`.
-   - Add facilities/lanes/shipments to the issue description for context.
+   - Include scope (facilities/lanes/shipments), `trust_tier`, `impact_score`, and evidence summary (`merge_summary` or `artifact_hash`) in the description.
+   - Example description snippet:
+     ```
+     Summary: {summary}
+     Classification: {classification} | Impact score: {impact_score} | Trust tier: {trust_tier}
+     Correlation: {correlation.key} ({correlation.action})
+     Scope: Facilities {facilities} | Lanes {lanes} | Shipments {shipments}
+     Evidence: {merge_summary_or_hash}
+     ```
 4) Run the bridge after each successful `hardstop run`.
 
 ### Set Hardstop as the repo of record

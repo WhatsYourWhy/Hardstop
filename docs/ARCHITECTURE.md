@@ -192,6 +192,20 @@ The rationale payload is purely evidentiary; it does not change the decision sur
 
 ---
 
+## Reporting, exports, and integration boundary (P3 additions)
+
+- **Read-only boundary:** Reporting and integrations consume artifacts produced by the runtime; they never mutate upstream state. Preferred inputs:
+  - `brief_api.get_brief` read model (`brief.v1` / `brief.v2`)
+  - Export bundles derived from the brief read model (see `docs/specs/brief-v2.md`)
+  - Incident evidence artifacts (`output/incidents/incident-evidence.v1`)
+  - Source health data from `sources_api.get_sources_health`
+- **Brief/Export shape:** Brief v2 extends v1 with provenance (root_event_count/ids optional) and explicit evidence summary (`merge_summary`, `artifact_hash`) plus suppression rollups. Trust tier and tier fields remain optional; renderers must tolerate `None` by displaying “Unknown.”
+- **Determinism:** Presentation ordering is explicit (impact sorting, tier grouping). Do not resort downstream. Bundle filenames should support pinning (`filename_basename`) for CI snapshots.
+- **Integration payloads:** Slack/Linear sinks should consume exported bundles or the brief JSON, not the DB. Payloads should include `correlation.key` for threading and optionally the `artifact_hash` for evidence traceability.
+- **Exit signals:** CI and schedulers should treat exit codes as the gating signal (0 healthy, 1 warning, 2 broken) and surface brief/export artifacts as read-only outputs.
+
+---
+
 ## Configuration Model
 
 Configuration is part of determinism, so it must be fingerprinted.
