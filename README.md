@@ -392,7 +392,7 @@ Each release should confirm which priority band is active and update this file,
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.10+
 - SQLite (included with Python)
 - Network access for fetching external sources
 
