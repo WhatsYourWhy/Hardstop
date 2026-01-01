@@ -114,3 +114,23 @@ def test_render_markdown_surfaces_evidence_summary():
 
     markdown = render_markdown(brief_data)
     assert "Evidence: Existing alert seen within 168h window; Shared facilities: FAC-1" in markdown
+
+
+def test_render_markdown_with_missing_unknown_tier_count():
+    """Ensure renderer handles tier_counts without an unknown entry."""
+    brief_data = {
+        "read_model_version": "brief.v1",
+        "generated_at_utc": "2024-05-02T00:00:00Z",
+        "window": {"since": "24h", "since_hours": 24},
+        "counts": {"new": 1, "updated": 0, "impactful": 0, "relevant": 1, "interesting": 0},
+        "tier_counts": {"global": 2, "regional": 1, "local": 0},  # missing unknown key
+        "top": [],
+        "updated": [],
+        "created": [],
+        "suppressed": {"count": 0, "by_rule": [], "by_source": []},
+        "suppressed_legacy": {"total_queried": 1, "limit_applied": 20},
+    }
+
+    markdown = render_markdown(brief_data)
+
+    assert "- **Tier:** Global 2 | Regional 1" in markdown
