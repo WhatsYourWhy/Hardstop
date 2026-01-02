@@ -341,6 +341,7 @@ Hardstop tracks the health of all sources:
 - **Error Tracking**: Last error message and status code
 - **Health Score & Failure Budgets**: Each source receives a deterministic 0-100 score. Falling below the failure-budget threshold marks the source as `WATCH` (warning) or `BLOCKED` (gating downstream phases).
 - **Suppression Analytics**: Reason codes and samples are captured per source so noisy rules can be tuned.
+- **Never-run placeholders**: Newly added sources with no `SourceRun` history appear as `BLOCKED` (score ≈30) placeholders until their first successful fetch. This is expected and prevents Hardstop from assuming a source is healthy before it runs—kick off `hardstop sources test <source_id>` to validate a new source immediately.
 
 **Commands:**
 - `hardstop sources health`: View health table for all sources

@@ -7,6 +7,7 @@ Hardstop is intentionally local-first, but it plays well with the rest of your p
 - The `hardstop sources health` table emits `score`, `health_budget_state` (`HEALTHY`, `WATCH`, `BLOCKED`), and `suppression_pct` columns so schedulers or monitors can react to degraded sources.
 - The sources API (`src/hardstop/api/sources_api.py`) returns `health_budget_state` for each source; downstream consumers can mirror the CLI gating logic in dashboards or alerting rules.
 - To audit noisy rules, run `hardstop sources health --explain-suppress <source_id>` and capture the reason counts + samples as an attachment in your observability tool.
+- Newly added sources with no `SourceRun` history intentionally render as `BLOCKED` (score ≈30) placeholders until their first successful fetch; surface this as “pending first run” in dashboards and prompt operators to run `hardstop sources test <source_id>` instead of flagging it as a failure.
 
 ## Slack
 
