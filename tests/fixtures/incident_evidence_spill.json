@@ -1,5 +1,4 @@
 {
-  "artifact_hash": "aba3925edab1eb6c3c8387b51a0bd375a1d49444167d6115900d86fe3540aef7",
   "artifact_version": "incident-evidence.v1",
   "correlation_key": "SPILL|DC-01|LANE-1",
   "generated_at_utc": "2024-05-02T00:00:00Z",
@@ -96,5 +95,7 @@
       "shipments": []
     }
   },
-  "window_hours": 168
+  "window_hours": 168,
+  "determinism_mode": "live",
+  "artifact_hash": "fa14545b1401b747dadb8b72959a227bb00e9012f813ecddf1414ffbf502f666"
 }
