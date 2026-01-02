@@ -49,3 +49,9 @@ Verdict: **Not met.** Criteria 1–4 are satisfied by HS-AUDIT-01…08 evidence,
 3. **Document “never run” source states and suppression budgets in README/INTEGRATIONS.** Call out that new sources appear as `BLOCKED` until first success and link to suppression explainers so operators can interpret watch/blocked budgets without reading the code.
 
 With these actions, Hardstop can confidently upgrade from “hold” to “ship” while keeping prior determinism guarantees intact.
+
+## HS-11 Update — 2026-01-02
+
+- README bootstrap steps now call out Python 3.10+, the `python3-venv` package, PATH requirements for `$HOME/.local/bin`, the `hardstop init` → `doctor` → `run` sequence, and why “never run” sources show up as `BLOCKED` until the first successful fetch. Operators can follow the document verbatim on a clean Ubuntu image with no inline fixes.
+- `hardstop doctor` surfaces PATH/CLI guidance, recommends `hardstop init` when configs are missing, and points newcomers toward `hardstop run --since 24h` to create the database. Messaging matches the README so the bootstrap story is consistent.
+- With HS-11 the “Executable documentation” criterion from HS-AUDIT-09 is ready to move from ⚠ Watch to ✅ Pass pending reviewer confirmation, unblocking the Hold → Ship reevaluation.

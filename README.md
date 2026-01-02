@@ -69,6 +69,12 @@ Use `--strict` flag to treat warnings as broken (exit code 2).
 
 ## Quick Start
 
+### Prerequisites (clean machine)
+
+- Python **3.10+** with `pip` (`python3 --version` should report 3.10 or newer).
+- The `python3-venv` package so `python3 -m venv` works. On Ubuntu/Debian run `sudo apt-get update && sudo apt-get install -y python3-venv`.
+- A shell `PATH` entry for user-level scripts (typically `$HOME/.local/bin`). Add `export PATH="$HOME/.local/bin:$PATH"` to your shell rc file if `which hardstop` fails outside an activated virtualenv or `pip install --user` environment.
+
 ### Installation (reproducible and hashed)
 
 ```bash
@@ -83,6 +89,8 @@ pip install --require-hashes -r requirements.lock.txt
 # 3. Expose Hardstop in editable mode (keeps local code changes live)
 pip install --no-deps -e .
 ```
+
+> If `python3 -m venv` fails with `No module named venv`, install the `python3-venv` package from the prerequisites section and rerun the command.
 
 - `requirements.lock.txt` bundles runtime + dev extras (pytest, pip-tools, pip-audit, etc.) so every install resolves to the same wheels across machines.
 - After pulling new changes, re-sync with: `pip-sync requirements.lock.txt` (available because pip-tools is part of the lockset).
@@ -113,13 +121,23 @@ Commit the updated `requirements.lock.txt` alongside any intentional spec bumps 
 
 ### First-Time Setup
 
+Run these once per checkout to bootstrap configuration safely:
+
+1. Run `hardstop init` immediately after installation to copy the example configs. This command is idempotent—omit `--force` to preserve existing changes, and only pass `--force` when you intentionally want to overwrite your current configs with the shipped examples.
+2. Review and edit `config/sources.yaml` plus `config/suppression.yaml` so they match your monitoring needs.
+3. (Recommended) Run `hardstop doctor` to confirm PATH, config, database, and source health expectations before the first fetch.
+4. Load network data, run the pipeline, and generate a brief.
+
 ```bash
 # Initialize configuration files from examples
-hardstop init
+hardstop init          # add --force only when you intend to reset configs
 
 # Review and customize config files
 # - config/sources.yaml: Configure your sources
 # - config/suppression.yaml: Configure suppression rules
+
+# Optional but recommended: verify bootstrap health
+hardstop doctor
 
 # Load network data (required for network linking)
 hardstop ingest
@@ -130,6 +148,8 @@ hardstop run --since 24h
 # Generate your first brief
 hardstop brief --today --since 24h
 ```
+
+> Newly added or “never run” sources appear as `BLOCKED` placeholders in `hardstop doctor` / `hardstop sources health` until they succeed once. Kick off `hardstop sources test <source_id> --since 72h` to prime a new source immediately—the state flips as soon as its first fetch records a success.
 
 ### Demo Pipeline (P0 verification)
 

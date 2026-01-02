@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import sys
 import uuid
@@ -1186,6 +1187,33 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     
     issues = []
     warnings = []
+
+    # Check 0: CLI access & PATH hygiene
+    print("\n[0] CLI Access & PATH...")
+    try:
+        user_bin = Path.home() / ".local" / "bin"
+        path_entries = [
+            entry for entry in os.environ.get("PATH", "").split(os.pathsep) if entry
+        ]
+        hardstop_path = shutil.which("hardstop")
+        if hardstop_path:
+            print(f"  [OK] hardstop CLI found at: {hardstop_path}")
+        else:
+            warning_msg = "hardstop CLI not found on PATH (activate your venv or add ~/.local/bin)"
+            warnings.append(warning_msg)
+            print(f"  [WARN] {warning_msg}")
+        if user_bin.exists():
+            if str(user_bin) in path_entries:
+                print(f"  [OK] PATH includes user-level scripts: {user_bin}")
+            else:
+                msg = f"{user_bin} not on PATH (pip --user installs land here)"
+                warnings.append(msg)
+                print(f"  [WARN] {msg}")
+                print('        Add `export PATH="$HOME/.local/bin:$PATH"` to your shell rc or re-activate your virtualenv.')
+    except Exception as e:
+        warn_msg = f"PATH check failed: {e}"
+        warnings.append(warn_msg)
+        print(f"  [WARN] {warn_msg}")
     
     # Check 1: DB exists and migrations applied
     print("\n[1] Database Check...")
@@ -1195,8 +1223,13 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         db_path = Path(sqlite_path)
         
         if not db_path.exists():
-            issues.append(f"Database not found: {sqlite_path}")
-            print(f"  [X] Database not found: {sqlite_path}")
+            issue_msg = (
+                f"Database not found: {sqlite_path} "
+                "(run `hardstop init` then `hardstop run --since 24h` to create it)"
+            )
+            issues.append(issue_msg)
+            print(f"  [X] {issue_msg}")
+            print("        Follow the README first-time setup commands to create a fresh SQLite database.")
         else:
             print(f"  [OK] Database exists: {sqlite_path}")
             
@@ -1332,11 +1365,16 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         if len(enabled_sources) == 0:
             warnings.append("No enabled sources configured")
     except FileNotFoundError:
-        issues.append("sources.yaml not found")
-        print("  [X] sources.yaml not found")
+        issue_msg = "sources.yaml not found (run `hardstop init` to copy the example config)"
+        issues.append(issue_msg)
+        print(f"  [X] {issue_msg}")
     except Exception as e:
-        issues.append(f"Sources config error: {e}")
-        print(f"  [X] Sources config error: {e}")
+        issue_msg = (
+            f"Sources config error: {e} "
+            "(fix the file or run `hardstop init --force` to regenerate from the example)"
+        )
+        issues.append(issue_msg)
+        print(f"  [X] {issue_msg}")
     
     # Check 3: Network connectivity (basic)
     print("\n[3] Network Connectivity...")
