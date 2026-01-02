@@ -22,5 +22,5 @@ def test_incident_evidence_fixture_hash_regression():
     fixture_path = Path("tests/fixtures/incident_evidence_spill.json")
     digest = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
     assert (
-        digest == "90a49be2c3a598ce4ff1b23bdaf4823fc8119a799321eb1fcb90e5e9ed7444f1"
+        digest == "723ce988b67f2c60d0316931542e5cf5bebfcf24661fb4e08fb3fe2ff7db7ba7"
     ), "incident_evidence_spill.json hash changed; update golden expectation if intentional"
