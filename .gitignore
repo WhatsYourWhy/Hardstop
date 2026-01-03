@@ -145,6 +145,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.venv_cli_smoke/
 env/
 venv/
 ENV/
@@ -217,3 +218,7 @@ output/
 run_records/
 !src/hardstop/output/
 !src/hardstop/output/README.md
+
+# Hardstop local configuration (generated via `hardstop init`)
+config/sources.yaml
+config/suppression.yaml

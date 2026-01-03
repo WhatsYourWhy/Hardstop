@@ -520,7 +520,8 @@ Dependency management lives in `pyproject.toml`, with a hashed `requirements.loc
 - `docs/ARCHITECTURE.md` — deep dive into adapters, operators, and runtime boundaries.
 - `docs/EXECUTION_PLAN.md` — living roadmap that explains which priority band (P0–P3) is currently active.
 - `docs/P2_READINESS.md` — readiness checklist that ties release criteria back to deterministic guarantees.
-- `docs/audit/` — reproducibility logs (`Repro_Log_*`), dependency reports, schema reviews, and the [`CLI_Contract_03_README_vs_Reality.md`](docs/audit/CLI_Contract_03_README_vs_Reality.md) gap analysis that validates every command documented here.
+- `docs/audit/Contract_Index.md` — index of the current “contracts” (README claims) mapped to enforcing code/tests.
+- `docs/archive/audit/2026-01/` — archived reproducibility logs (`Repro_Log_*`), dependency reports, schema reviews, and the [`CLI_Contract_03_README_vs_Reality.md`](docs/archive/audit/2026-01/CLI_Contract_03_README_vs_Reality.md) gap analysis that validates every command documented here.
 - `docs/specs/run-record.schema.json` — JSON Schema for emitted run records (useful for downstream tooling or CI validation).
 
 Use these references when filing issues or extending the system so the README always stays in lock-step with the authoritative specs.
@@ -530,7 +531,7 @@ Use these references when filing issues or extending the system so the README al
 - Run `hardstop doctor` first; it validates PATH, config files, SQLite health, and source failure budgets in one pass.
 - Use `hardstop sources health --explain-suppress <source_id>` to inspect deterministic suppression reasons before loosening rules.
 - Capture golden artifacts with `hardstop demo --mode pinned` plus `tools/validate_run_records.py run_records/<file>.json` when reporting determinism regressions.
-- Reference the audit logs under `docs/audit/` or rerun the scenarios in `Repro_Log_0*` to confirm whether an observed behavior is expected.
+- Reference the audit logs under `docs/archive/audit/2026-01/` or rerun the scenarios in `Repro_Log_0*` to confirm whether an observed behavior is expected.
 - When logging bugs, attach the relevant `run_records/` JSON and note whether the environment followed the locked install instructions above.
 
 ## Contributing
