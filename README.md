@@ -2,6 +2,31 @@
 
 **Hardstop** is a local-first, domain-agnostic event → risk → alert engine designed for personal daily driver use. It monitors external sources (RSS feeds, government APIs, alerts) and generates actionable risk alerts by linking events to your operational network.
 
+## Table of Contents
+
+- [What is Hardstop?](#what-is-hardstop)
+- [Connect your tools](#connect-your-tools)
+- [Status](#status)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [First-Time Setup](#first-time-setup)
+- [Demo Pipeline (P0 verification)](#demo-pipeline-p0-verification)
+- [Daily Workflow](#daily-workflow)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Source Health Monitoring](#source-health-monitoring)
+- [Exit Codes and Run Status](#exit-codes-and-run-status)
+- [Architecture](#architecture)
+- [Run Records in Practice](#run-records-in-practice)
+- [Execution Plan](#execution-plan)
+- [Requirements](#requirements)
+- [Project Structure](#project-structure)
+- [Key Documentation & Audits](#key-documentation--audits)
+- [Support & Troubleshooting](#support--troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
+- [Changelog](#changelog)
+
 ## What is Hardstop?
 
 Hardstop solves the problem of information overload from multiple alert sources. Instead of manually checking dozens of feeds, Hardstop:
@@ -489,6 +514,24 @@ hardstop-agent/
 ```
 
 Dependency management lives in `pyproject.toml`, with a hashed `requirements.lock.txt` generated via `pip-compile` to guarantee reproducible installs.
+
+## Key Documentation & Audits
+
+- `docs/ARCHITECTURE.md` — deep dive into adapters, operators, and runtime boundaries.
+- `docs/EXECUTION_PLAN.md` — living roadmap that explains which priority band (P0–P3) is currently active.
+- `docs/P2_READINESS.md` — readiness checklist that ties release criteria back to deterministic guarantees.
+- `docs/audit/` — reproducibility logs (`Repro_Log_*`), dependency reports, schema reviews, and the [`CLI_Contract_03_README_vs_Reality.md`](docs/audit/CLI_Contract_03_README_vs_Reality.md) gap analysis that validates every command documented here.
+- `docs/specs/run-record.schema.json` — JSON Schema for emitted run records (useful for downstream tooling or CI validation).
+
+Use these references when filing issues or extending the system so the README always stays in lock-step with the authoritative specs.
+
+## Support & Troubleshooting
+
+- Run `hardstop doctor` first; it validates PATH, config files, SQLite health, and source failure budgets in one pass.
+- Use `hardstop sources health --explain-suppress <source_id>` to inspect deterministic suppression reasons before loosening rules.
+- Capture golden artifacts with `hardstop demo --mode pinned` plus `tools/validate_run_records.py run_records/<file>.json` when reporting determinism regressions.
+- Reference the audit logs under `docs/audit/` or rerun the scenarios in `Repro_Log_0*` to confirm whether an observed behavior is expected.
+- When logging bugs, attach the relevant `run_records/` JSON and note whether the environment followed the locked install instructions above.
 
 ## Contributing
 
