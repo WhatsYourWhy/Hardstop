@@ -1,6 +1,6 @@
 # Hardstop
 
-**Hardstop** is a local-first, domain-agnostic event → risk → alert engine designed for personal daily driver use. It monitors external sources (RSS feeds, government APIs, alerts) and generates actionable risk alerts by linking events to your operational network.
+**Hardstop** is a deterministic supply chain risk decision engine. It monitors external sources (RSS feeds, government APIs, alerts) and generates actionable risk alerts by linking events to your operational network.
 
 <p align="center">
   <img src="docs/assets/hardstop-branding.png" alt="Hardstop branding" width="540">
@@ -182,6 +182,7 @@ hardstop doctor
 
 # Load network data (required for network linking)
 hardstop ingest
+# See docs/CSV_CONTRACT.md for CSV format requirements
 
 # Run your first fetch and ingest
 hardstop run --since 24h

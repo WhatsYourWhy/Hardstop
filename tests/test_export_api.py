@@ -336,3 +336,168 @@ def test_alert_reconstruction_with_source_metadata(session):
     # This would require querying the Alert row for tier/source_id/trust_tier and adding to evidence.source
     # For now, we verify that the correlation_action and scope_json are preserved
 
+
+def test_export_bundle_is_deterministic(tmp_path, session):
+    """Test that export bundle is deterministic (same inputs produce same outputs)."""
+    import hashlib
+    from pathlib import Path
+    
+    # Create some test alerts first
+    from hardstop.database.alert_repo import upsert_new_alert_row
+    import json
+    
+    alert_id_1 = "ALERT-EXPORT-1"
+    alert_id_2 = "ALERT-EXPORT-2"
+    
+    scope_json = json.dumps({
+        "facilities": ["FAC-001"],
+        "lanes": ["LANE-001"],
+        "shipments": ["SHIP-001"],
+    })
+    
+    upsert_new_alert_row(
+        session,
+        alert_id=alert_id_1,
+        summary="Test alert 1",
+        risk_type="TEST",
+        classification=2,
+        status="OPEN",
+        reasoning="Test",
+        recommended_actions=None,
+        root_event_id="EVT-EXPORT-1",
+        correlation_key="export:test:1",
+        correlation_action="CREATED",
+        impact_score=8,
+        scope_json=scope_json,
+    )
+    
+    upsert_new_alert_row(
+        session,
+        alert_id=alert_id_2,
+        summary="Test alert 2",
+        risk_type="TEST",
+        classification=1,
+        status="OPEN",
+        reasoning="Test",
+        recommended_actions=None,
+        root_event_id="EVT-EXPORT-2",
+        correlation_key="export:test:2",
+        correlation_action="CREATED",
+        impact_score=5,
+        scope_json=scope_json,
+    )
+    session.commit()
+    
+    # Create output directories
+    export_dir_1 = tmp_path / "export_1"
+    export_dir_2 = tmp_path / "export_2"
+    export_dir_1.mkdir()
+    export_dir_2.mkdir()
+    
+    # First export run
+    export_file_1 = export_dir_1 / "alerts.json"
+    export_alerts(
+        session,
+        since=None,
+        limit=50,
+        format="json",
+        out=export_file_1,
+    )
+    
+    # Second export run (same inputs)
+    export_file_2 = export_dir_2 / "alerts.json"
+    export_alerts(
+        session,
+        since=None,
+        limit=50,
+        format="json",
+        out=export_file_2,
+    )
+    
+    # Compare file lists (should be identical)
+    files_1 = sorted([f.name for f in export_dir_1.iterdir()])
+    files_2 = sorted([f.name for f in export_dir_2.iterdir()])
+    assert files_1 == files_2, f"File lists must be identical: {files_1} != {files_2}"
+    
+    # Compare per-file SHA-256 hashes
+    def file_hash(path: Path) -> str:
+        content = path.read_text(encoding="utf-8")
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    
+    hash_1 = file_hash(export_file_1)
+    hash_2 = file_hash(export_file_2)
+    assert hash_1 == hash_2, f"File hashes must be identical: {hash_1} != {hash_2}"
+    
+    # Compare manifest ordering (parse JSON and check data ordering)
+    data_1 = json.loads(export_file_1.read_text(encoding="utf-8"))
+    data_2 = json.loads(export_file_2.read_text(encoding="utf-8"))
+    
+    # Check schema version
+    assert data_1["export_schema_version"] == data_2["export_schema_version"]
+    
+    # Check data ordering (alert IDs should be in same order)
+    alert_ids_1 = [alert["alert_id"] for alert in data_1["data"]]
+    alert_ids_2 = [alert["alert_id"] for alert in data_2["data"]]
+    assert alert_ids_1 == alert_ids_2, f"Alert ordering must be stable: {alert_ids_1} != {alert_ids_2}"
+    
+    # For brief export, test the same
+    brief_file_1 = export_dir_1 / "brief.json"
+    brief_file_2 = export_dir_2 / "brief.json"
+    
+    export_brief(
+        session,
+        since="24h",
+        include_class0=False,
+        limit=20,
+        format="json",
+        out=brief_file_1,
+    )
+    
+    export_brief(
+        session,
+        since="24h",
+        include_class0=False,
+        limit=20,
+        format="json",
+        out=brief_file_2,
+    )
+    
+    # Compare brief hashes (excluding exported_at_utc which may differ)
+    brief_data_1 = json.loads(brief_file_1.read_text(encoding="utf-8"))
+    brief_data_2 = json.loads(brief_file_2.read_text(encoding="utf-8"))
+    
+    # Remove exported_at_utc for comparison (it's a timestamp)
+    brief_data_1_no_time = {k: v for k, v in brief_data_1.items() if k != "exported_at_utc"}
+    brief_data_2_no_time = {k: v for k, v in brief_data_2.items() if k != "exported_at_utc"}
+    
+    # Compare structure and data (not timestamps)
+    assert brief_data_1_no_time == brief_data_2_no_time, "Brief data (excluding timestamps) must be identical"
+    
+    # For sources export
+    sources_file_1 = export_dir_1 / "sources.json"
+    sources_file_2 = export_dir_2 / "sources.json"
+    
+    export_sources(
+        session,
+        lookback="7d",
+        stale="72h",
+        format="json",
+        out=sources_file_1,
+    )
+    
+    export_sources(
+        session,
+        lookback="7d",
+        stale="72h",
+        format="json",
+        out=sources_file_2,
+    )
+    
+    # Compare sources hashes (excluding exported_at_utc)
+    sources_data_1 = json.loads(sources_file_1.read_text(encoding="utf-8"))
+    sources_data_2 = json.loads(sources_file_2.read_text(encoding="utf-8"))
+    
+    sources_data_1_no_time = {k: v for k, v in sources_data_1.items() if k != "exported_at_utc"}
+    sources_data_2_no_time = {k: v for k, v in sources_data_2.items() if k != "exported_at_utc"}
+    
+    assert sources_data_1_no_time == sources_data_2_no_time, "Sources data (excluding timestamps) must be identical"

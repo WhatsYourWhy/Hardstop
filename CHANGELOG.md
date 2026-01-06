@@ -49,7 +49,21 @@
 - Scoring math pinned to persisted telemetry once adapters emit the enriched envelopes
 # Changelog
 
-## [1.0.0] - 2024-XX-XX
+## [1.0.0] - Unreleased
+
+**V1 Frozen (Supply Chain)** — Hardstop (Supply Chain) v1.0 is frozen as a deterministic, consulting-ready supply chain risk decision engine. Core decision semantics are stable. Behavior-changing changes require a v1.x or v2 proposal.
+
+### Explicit V1 Non-Goals
+
+V1 ships without:
+- UI
+- SaaS / multi-tenant architecture
+- Generic entity schemas
+- Plugin marketplace
+- ML-driven classification
+- Cross-domain abstractions
+
+These are intentionally deferred, not missing.
 
 ### Added
 - Self-evaluating runs with exit codes
