@@ -2,6 +2,10 @@
 
 **Hardstop** is a local-first, domain-agnostic event → risk → alert engine designed for personal daily driver use. It monitors external sources (RSS feeds, government APIs, alerts) and generates actionable risk alerts by linking events to your operational network.
 
+<p align="center">
+  <img src="docs/assets/hardstop-branding.png" alt="Hardstop branding" width="540">
+</p>
+
 ## Table of Contents
 
 - [Quick Start TL;DR](#quick-start-tldr)
