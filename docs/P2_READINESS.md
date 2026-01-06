@@ -37,6 +37,25 @@ regression-tested while contributors extend or maintain the decision core.
 - **Regression coverage:** `tests/test_impact_scorer.py`,
   `tests/test_demo_pipeline.py`, `tests/test_golden_run.py`.
 
+## Alert quality validation (src/hardstop/alerts/alert_builder.py)
+
+- **Status:** Delivered. `_compute_max_allowed_classification()` enforces confidence
+  thresholds to prevent false positives from low-confidence network matches. Uses
+  caps-first model with Policy B (quality validation is authoritative).
+- **Maintenance checklist / acceptance mapping:**
+  - Keep quality thresholds synchronized with `hardstop.config.yaml` defaults
+    and `docs/ARCHITECTURE.md` documentation.
+  - Ensure confidence scores default to 0.0 (not 1.0) when missing to prevent
+    false positives.
+  - Maintain deterministic keyword detection patterns (phrase-based, not single-word)
+    to avoid false positives like "fire sale" or "strike price".
+  - Preserve Policy B behavior: quality caps are authoritative; source policy
+    minimums can raise but not override caps.
+  - Update regression tests when thresholds or compensation logic changes.
+- **Regression coverage:** Quality validation is tested implicitly through
+  `tests/test_impact_scorer.py` and `tests/test_demo_pipeline.py`. Explicit
+  confidence threshold tests should be added to validate edge cases.
+
 ## Correlation evidence graph (src/hardstop/output/incidents/*)
 
 - **Status:** Delivered. `hardstop/output/incidents/evidence.py` stores merge

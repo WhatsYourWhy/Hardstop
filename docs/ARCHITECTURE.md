@@ -172,7 +172,7 @@ Hardstop enforces bounded causal radius to avoid “firehose” behavior:
 | Canonicalization | `hardstop/parsing/normalizer.py`, `hardstop/parsing/entity_extractor.py` | Includes deterministic enrichment with network data. |
 | Noise Control | `hardstop/suppression/engine.py`, `hardstop/retrieval/dedupe.py` (implicit) | Suppression metadata is persisted for audits. |
 | Temporal Inference | `hardstop/alerts/correlation.py`, `hardstop/alerts/alert_builder.py` (incident grouping) | 7-day window + correlation key boundedness. |
-| Evaluation | `hardstop/alerts/impact_scorer.py`, `hardstop/alerts/alert_builder.py` | Strict heuristics with trust-tier modifiers and rationale fields. |
+| Evaluation | `hardstop/alerts/impact_scorer.py`, `hardstop/alerts/alert_builder.py` | Strict heuristics with trust-tier modifiers, quality validation (confidence thresholds), and rationale fields. |
 | Reporting | `hardstop/output/daily_brief.py`, `hardstop/api/export.py` | Render-only; no decision authority. |
 | Artifact Layer | `hardstop/database/*`, `hardstop/ops/run_status.py` | SQLite store, migrations, run evaluation, provenance. |
 
@@ -189,6 +189,29 @@ Impact scoring emits deterministic rationale alongside numeric scores under `Ale
 - `score_trace`: Base score before modifiers, final capped score, and any keyword terms that triggered scoring.
 
 The rationale payload is purely evidentiary; it does not change the decision surface but keeps score explainability stable across runs.
+
+### Alert Quality Validation (confidence thresholds)
+
+Alert classification is validated against network linking confidence to prevent false positives from low-confidence matches. This uses a "caps-first" model where quality validation determines the maximum allowed classification, then source policy minimums can raise (but not override) the cap.
+
+**Policy B (default)**: Quality validation is authoritative. The system computes `max_allowed_classification` based on:
+- Facility confidence scores (0.0-1.0, default 0.0 if missing)
+- Facility match provenance (exact ID, name substring, city/state, ambiguous)
+- Compensating factors (trust tier, high-impact keywords, network signals)
+- High-impact factor validation (classification 2 requires 2+ factors)
+
+**Thresholds** (configurable in `hardstop.config.yaml`):
+- `min_confidence_class_1`: 0.60 (for "Relevant" alerts)
+- `min_confidence_class_2`: 0.70 (for "Impactful" alerts)
+- `min_confidence_ambiguous`: 0.50 (for ambiguous matches, requires extra evidence)
+
+**Key behaviors**:
+- Ambiguous facility matches (multiple facilities in same city/state) are capped at classification 1 max
+- Trust tier provides partial compensation but cannot fully override low confidence
+- High-impact keywords require operational context (facility names, locations) to avoid false positives
+- Events with no network links are capped at classification 0
+
+Quality validation reasoning is included in alert `reasoning` fields for full auditability.
 
 ---
 

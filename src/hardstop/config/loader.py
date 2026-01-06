@@ -305,3 +305,37 @@ def load_keywords_config(path: Path | None = None) -> Dict[str, Any]:
     config["risk_keywords"] = normalized_keywords
     return config
 
+
+def load_alert_quality_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """
+    Load alert quality thresholds from main config.
+    
+    Returns alert quality settings with safe defaults. These thresholds control
+    how network linking confidence affects alert classification to prevent
+    false positives from low-confidence matches.
+    
+    Args:
+        config: Optional main config dict. If None, loads from default path.
+    
+    Returns:
+        Dict with alert quality settings:
+        - min_confidence_class_1: Minimum facility confidence for "Relevant" alerts (default 0.60)
+        - min_confidence_class_2: Minimum facility confidence for "Impactful" alerts (default 0.70)
+        - min_confidence_ambiguous: Minimum confidence for ambiguous matches (default 0.50)
+        - allow_quality_override_floor: Whether quality validation can override source policy minimum (default True)
+    """
+    if config is None:
+        try:
+            config = load_config()
+        except FileNotFoundError:
+            config = {}
+    
+    quality_config = config.get("alert_quality", {})
+    
+    # Safe defaults (conservative)
+    return {
+        "min_confidence_class_1": float(quality_config.get("min_confidence_class_1", 0.60)),
+        "min_confidence_class_2": float(quality_config.get("min_confidence_class_2", 0.70)),
+        "min_confidence_ambiguous": float(quality_config.get("min_confidence_ambiguous", 0.50)),
+        "allow_quality_override_floor": bool(quality_config.get("allow_quality_override_floor", True)),
+    }

@@ -88,7 +88,7 @@ Hardstop is designed to be local-first but still play nicely with your collabora
 - **Suppression Rules**: Filter noisy events using keyword, regex, or exact match patterns (global and per-source)
 - **Event Processing**: Normalize raw events into canonical format
 - **Network Linking**: Automatically link events to facilities, lanes, and shipments
-- **Alert Generation**: Deterministic risk assessment using network impact scoring with trust tier modifiers
+- **Alert Generation**: Deterministic risk assessment using network impact scoring with trust tier modifiers and quality validation (confidence thresholds prevent false positives)
 - **Alert Correlation**: Deduplicate and update alerts based on correlation keys
 - **Tier-Aware Briefing**: Generate summaries with tier counts, badges, and grouping (markdown or JSON)
 - **Run Status Evaluation**: Self-evaluating runs with exit codes (0=healthy, 1=warning, 2=broken)
@@ -354,7 +354,7 @@ Define external sources with metadata. Defaults are layered:
   - Tier 3: High trust (official sources) → +1 impact score
   - Tier 2: Medium trust (default) → no modifier
   - Tier 1: Low trust → -1 impact score
-- **classification_floor**: Minimum alert classification (0-2, default 0)
+- **classification_floor**: Minimum alert classification (0-2, default 0). Note: Quality validation may reduce classification below this floor to prevent false positives (Policy B: quality is authoritative).
 - **weighting_bias**: Impact score adjustment (-2 to +2, default 0)
 - **suppress**: Per-source suppression rules
 
@@ -408,6 +408,32 @@ rules:
     case_sensitive: false
     note: "Common noise across multiple feeds"
 ```
+
+#### Alert Quality Configuration (`hardstop.config.yaml`)
+
+Control how network linking confidence affects alert classification to prevent false positives:
+
+- **min_confidence_class_1**: Minimum facility confidence for "Relevant" alerts (default 0.60)
+- **min_confidence_class_2**: Minimum facility confidence for "Impactful" alerts (default 0.70)
+- **min_confidence_ambiguous**: Minimum confidence for ambiguous facility matches (default 0.50, requires extra evidence)
+- **allow_quality_override_floor**: Whether quality validation can override source policy minimum (default true, Policy B)
+
+**Policy B (default)**: Quality validation is authoritative. Low-confidence network matches are downgraded to prevent false positives, even if `classification_floor` would raise them. Source policy minimum can still raise from 0, but cannot override quality caps.
+
+**Example:**
+```yaml
+alert_quality:
+  min_confidence_class_1: 0.60  # For "Relevant" alerts
+  min_confidence_class_2: 0.70  # For "Impactful" alerts
+  min_confidence_ambiguous: 0.50  # For ambiguous matches
+  allow_quality_override_floor: true  # Quality caps are authoritative
+```
+
+**How it works:**
+- Events with low facility confidence (< 0.60) are capped at classification 0 (Interesting)
+- Ambiguous facility matches (multiple facilities in same city/state) are capped at classification 1 max, requiring 2+ compensating factors
+- Classification 2 alerts require both high confidence (≥ 0.70) and 2+ high-impact factors (criticality, volume, priority shipments, keywords)
+- Trust tier and high-impact keywords provide partial compensation but cannot fully override low confidence
 
 ### Source Health Monitoring
 

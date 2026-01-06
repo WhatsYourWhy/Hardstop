@@ -15,3 +15,13 @@ demo:
   shipments_csv: "tests/fixtures/shipments_snapshot.csv"
   event_json: "tests/fixtures/event_spill.json"
 
+alert_quality:
+  # Minimum facility confidence for each classification level
+  min_confidence_class_1: 0.60  # For "Relevant" alerts
+  min_confidence_class_2: 0.70  # For "Impactful" alerts
+  min_confidence_ambiguous: 0.50  # For ambiguous matches (requires extra evidence)
+  
+  # Policy: classification_min_by_source_policy can be reduced by quality validation
+  # (Policy B: quality validation is authoritative)
+  allow_quality_override_floor: true
+

@@ -132,6 +132,7 @@ _Status: Delivered with deterministic evidence + replay coverage (Jan 2026)._
 
 - **Canonicalization v2**: `hardstop/parsing/normalizer.py` and `hardstop/parsing/entity_extractor.py` now run as explicit operators, emit RunRecords, and normalize fixtures from `tests/fixtures/` with deterministic fallbacks for partial data.
 - **Impact scoring transparency**: `hardstop/alerts/impact_scorer.py` persists rationale envelopes (trust-tier modifiers, network criticality, suppression context) exposed through `AlertEvidence.diagnostics.impact_score_rationale` and consumption paths in briefs/exporters.
+- **Alert quality validation**: `hardstop/alerts/alert_builder.py` enforces confidence thresholds to prevent false positives from low-confidence network matches. Uses caps-first model with Policy B (quality validation is authoritative). Configurable thresholds in `hardstop.config.yaml`.
 - **Correlation evidence graph**: `hardstop/output/incidents/evidence.py` emits audit-ready artifacts explaining every merge (temporal overlap, shared facilities/lanes) with hashed payloads referenced by alerts and briefs.
 - **Incident replay CLI**: `hardstop cli incidents replay` replays incidents from stored artifacts/RunRecords via `hardstop.incidents.replay@1.0.0`, enforcing strict/best-effort semantics before broadcasting artifacts.
 - **Artifact schema updates**: `docs/specs/run-record.schema.json`, `hardstop/ops/run_record.py`, and the SQLite migrations now mirror the richer incident + decision metadata consumed by replay, scoring, and export surfaces.
