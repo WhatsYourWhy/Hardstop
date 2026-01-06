@@ -105,7 +105,7 @@ def _compute_max_allowed_classification(
     breakdown: List[str],
     trust_tier: int,
     quality_config: Dict[str, Any],
-) -> Tuple[int, List[str]]:
+) -> Tuple[int, List[str], int]:
     """
     Compute maximum allowed classification based on evidence quality (caps-first model).
     
@@ -126,7 +126,7 @@ def _compute_max_allowed_classification(
         quality_config: Alert quality configuration dict
     
     Returns:
-        Tuple of (max_allowed_classification, reasoning)
+        Tuple of (max_allowed_classification, reasoning, high_impact_factors_count)
     """
     reasoning = []
     
@@ -177,7 +177,7 @@ def _compute_max_allowed_classification(
         else:
             max_class = 0
             reasoning.append("No network links found")
-        return max_class, reasoning
+        return max_class, reasoning, high_impact_factors
     
     # Strategy 2: Ambiguous facility matches (strictest)
     if facility_provenance == "CITY_STATE_AMBIGUOUS":
@@ -188,7 +188,7 @@ def _compute_max_allowed_classification(
                 f"Ambiguous facility match (confidence {facility_conf:.2f} < {MIN_CONF_AMBIG}) "
                 f"without sufficient evidence"
             )
-            return max_class, reasoning
+            return max_class, reasoning, high_impact_factors
         
         # At or above ambiguous threshold - need strong compensating factors
         compensating_evidence = []
@@ -232,7 +232,7 @@ def _compute_max_allowed_classification(
                 f"Ambiguous facility match (confidence {facility_conf:.2f}) with insufficient "
                 f"compensating factors ({len(compensating_evidence)} found, requires 2+)"
             )
-        return max_class, reasoning
+        return max_class, reasoning, high_impact_factors
     
     # Strategy 3: Non-ambiguous matches with confidence thresholds
     if facility_conf >= MIN_CONF_CLASS_2:
@@ -298,7 +298,7 @@ def _compute_max_allowed_classification(
                 f"without sufficient compensating factors"
             )
     
-    return max_class, reasoning
+    return max_class, reasoning, high_impact_factors
 
 
 def _merge_scope(existing_scope_json: str | None, new_scope: Dict[str, object]) -> Dict[str, object]:
@@ -389,13 +389,28 @@ def build_basic_alert(
         quality_config = load_alert_quality_config()
         
         # NEW: Compute quality cap (Policy B: quality is authoritative)
-        max_allowed_class, quality_reasoning = _compute_max_allowed_classification(
+        max_allowed_class, quality_reasoning, high_impact_factors = _compute_max_allowed_classification(
             event=event,
             impact_score=impact_score,
             breakdown=breakdown,
             trust_tier=trust_tier,
             quality_config=quality_config,
         )
+        
+        # Extract confidence for metadata
+        link_confidence = event.get("link_confidence", {})
+        facility_conf = link_confidence.get("facility", 0.0)
+        link_provenance = event.get("link_provenance", {})
+        facility_provenance = link_provenance.get("facility", "")
+        
+        # Store quality validation metadata for diagnostics
+        quality_validation_metadata = {
+            "max_allowed_classification": max_allowed_class,
+            "high_impact_factors_count": high_impact_factors,
+            "facility_confidence": facility_conf,
+            "facility_provenance": facility_provenance,
+            "applied_policy": "B" if quality_config["allow_quality_override_floor"] else "A",
+        }
         
         # Apply quality cap
         original_classification = classification
@@ -433,6 +448,7 @@ def build_basic_alert(
             impact_score=impact_score,
             impact_score_breakdown=breakdown,
             impact_score_rationale=rationale,
+            quality_validation=quality_validation_metadata,
         )
         evidence = AlertEvidence(
             diagnostics=diagnostics,

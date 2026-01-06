@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Alert quality validation with confidence thresholds
+  - `_compute_max_allowed_classification()` enforces confidence thresholds to prevent false positives
+  - Caps-first model with Policy B (quality validation is authoritative)
+  - Configurable thresholds in `hardstop.config.yaml` (`alert_quality` section)
+  - Quality validation metadata exposed in `alert.evidence.diagnostics.quality_validation`
+  - Facility-first policy: facility confidence is privileged over lane/shipment confidence
+  - Ambiguous facility matches capped at classification 1 max, requiring 2+ compensating factors
+  - Improved keyword detection with phrase patterns to avoid false positives ("fire sale", "strike price")
+  - Unit tests in `tests/test_alert_quality_validation.py` for edge cases
+
+### Changed
+- `build_basic_alert()` now applies quality validation before source policy minimums
+- `classification_floor` renamed to `classification_min_by_source_policy` for clarity (Policy B)
+- Confidence scores default to 0.0 (not 1.0) when missing to prevent false positives
+- `AlertDiagnostics` now includes `quality_validation` metadata field
+
 ## [1.1.0] - 2025-02-15
 
 ### Added (shipped)

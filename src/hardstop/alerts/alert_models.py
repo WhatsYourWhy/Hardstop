@@ -36,6 +36,7 @@ class AlertDiagnostics(BaseModel):
     impact_score: int = 0
     impact_score_breakdown: list[str] = []
     impact_score_rationale: dict[str, object] = {}
+    quality_validation: dict[str, object] = {}  # Quality validation metadata (max_allowed_classification, high_impact_factors, etc.)
 
 
 class IncidentEvidenceSummary(BaseModel):

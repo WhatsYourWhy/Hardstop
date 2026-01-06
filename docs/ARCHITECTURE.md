@@ -190,6 +190,18 @@ Impact scoring emits deterministic rationale alongside numeric scores under `Ale
 
 The rationale payload is purely evidentiary; it does not change the decision surface but keeps score explainability stable across runs.
 
+### Quality validation metadata (deterministic audit envelope)
+
+Quality validation emits metadata under `AlertEvidence.diagnostics.quality_validation`:
+
+- `max_allowed_classification`: The quality cap applied to this alert (0, 1, or 2)
+- `high_impact_factors_count`: Number of high-impact factors detected (criticality, volume, priority shipments, keywords)
+- `facility_confidence`: Facility linking confidence score (0.0-1.0)
+- `facility_provenance`: How the facility was matched (`FACILITY_ID_EXACT`, `FACILITY_NAME_SUBSTRING`, `CITY_STATE`, `CITY_STATE_AMBIGUOUS`, etc.)
+- `applied_policy`: "A" or "B" indicating whether quality validation can override source policy minimum
+
+This metadata provides full explainability for why an alert received its classification, especially when quality validation downgraded it from the initial impact score mapping.
+
 ### Alert Quality Validation (confidence thresholds)
 
 Alert classification is validated against network linking confidence to prevent false positives from low-confidence matches. This uses a "caps-first" model where quality validation determines the maximum allowed classification, then source policy minimums can raise (but not override) the cap.
@@ -211,7 +223,22 @@ Alert classification is validated against network linking confidence to prevent 
 - High-impact keywords require operational context (facility names, locations) to avoid false positives
 - Events with no network links are capped at classification 0
 
-Quality validation reasoning is included in alert `reasoning` fields for full auditability.
+**Design Tradeoff: Facility-First Relevance**
+
+The quality validation model privileges facility confidence over lane/shipment confidence. This reflects the policy that "facility identity is the anchor of relevance" - if we're not confident about which facility is affected, we cannot confidently assess network impact, even if lanes or shipments are strongly linked.
+
+**Example:**
+- `facility_conf = 0.45` (low)
+- `lane_conf = 0.90` (high)
+- `shipment_conf = 0.85` (high)
+
+Result: Classification capped at 0, unless compensating factors (trust tier, keywords) apply.
+
+**Rationale:** Facilities are the primary network entities. Lanes and shipments derive from facilities, so weak facility confidence undermines downstream confidence. This prevents false positives from strong lane matches to wrong facilities.
+
+**Future consideration:** If use cases require "lane-first relevance" (e.g., carrier disruptions affecting multiple facilities), this policy can be adjusted by modifying `_compute_max_allowed_classification()` to consider lane confidence as a primary signal when facility confidence is missing.
+
+Quality validation reasoning and metadata are included in alert `reasoning` fields and `evidence.diagnostics.quality_validation` for full auditability.
 
 ---
 

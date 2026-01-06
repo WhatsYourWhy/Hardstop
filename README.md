@@ -439,6 +439,13 @@ alert_quality:
 - Classification 2 alerts require both high confidence (≥ 0.70) and 2+ high-impact factors (criticality, volume, priority shipments, keywords)
 - Trust tier and high-impact keywords provide partial compensation but cannot fully override low confidence
 
+**Quality validation metadata** is exposed in `alert.evidence.diagnostics.quality_validation`:
+- `max_allowed_classification`: The quality cap applied to this alert
+- `high_impact_factors_count`: Number of high-impact factors detected
+- `facility_confidence`: Facility linking confidence score
+- `facility_provenance`: How the facility was matched (exact ID, name, city/state, ambiguous)
+- `applied_policy`: "A" or "B" (quality override policy)
+
 ### Source Health Monitoring
 
 Hardstop tracks the health of all sources:

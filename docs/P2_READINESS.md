@@ -51,10 +51,13 @@ regression-tested while contributors extend or maintain the decision core.
     to avoid false positives like "fire sale" or "strike price".
   - Preserve Policy B behavior: quality caps are authoritative; source policy
     minimums can raise but not override caps.
+  - Keep `quality_validation` metadata in `AlertDiagnostics` synchronized with
+    validation logic (max_allowed_classification, high_impact_factors_count, etc.).
   - Update regression tests when thresholds or compensation logic changes.
-- **Regression coverage:** Quality validation is tested implicitly through
-  `tests/test_impact_scorer.py` and `tests/test_demo_pipeline.py`. Explicit
-  confidence threshold tests should be added to validate edge cases.
+- **Regression coverage:** `tests/test_alert_quality_validation.py` provides
+  explicit tests for ambiguous matches, facility-first policy, keyword detection,
+  and missing confidence defaults. Quality validation is also tested implicitly
+  through `tests/test_impact_scorer.py` and `tests/test_demo_pipeline.py`.
 
 ## Correlation evidence graph (src/hardstop/output/incidents/*)
 
