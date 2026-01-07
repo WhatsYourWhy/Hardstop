@@ -184,7 +184,7 @@ Canonicalization operator inputs/outputs and hashing rules are described in deta
 Impact scoring emits deterministic rationale alongside numeric scores under `AlertEvidence.diagnostics.impact_score_rationale`:
 
 - `network_criticality`: Facilities, lanes, and shipments that contributed to the base score. Includes the deltas applied, shipment counts, and near-term priority shipment IDs (sorted) so replayed runs reproduce the same rationale ordering.
-- `modifiers`: Trust-tier and weighting-bias deltas applied after the base score (`trust_tier_delta`, `weighting_bias_delta`, and the asserted `trust_tier`).
+- `modifiers`: Trust-tier and weighting-bias deltas applied after the base score (`trust_tier_delta`, `weighting_bias_delta`, and the asserted `trust_tier`). **Note**: Trust tier semantics (tier 3: +1, tier 2: 0, tier 1: -1) are designed for supply chain sources. Future domain adapters may require different trust tier interpretations.
 - `suppression_context`: Stable suppression metadata copied from the event (`suppression_status`, `suppression_primary_rule_id`, `suppression_rule_ids` sorted deterministically, and `suppression_reason_code` when present).
 - `score_trace`: Base score before modifiers, final capped score, and any keyword terms that triggered scoring.
 

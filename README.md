@@ -359,6 +359,7 @@ Define external sources with metadata. Defaults are layered:
   - Tier 3: High trust (official sources) → +1 impact score
   - Tier 2: Medium trust (default) → no modifier
   - Tier 1: Low trust → -1 impact score
+  - **Note**: Trust tier semantics are designed for supply chain sources. Future domain adapters may require different trust tier interpretations.
 - **classification_floor**: Minimum alert classification (0-2, default 0). Note: Quality validation may reduce classification below this floor to prevent false positives (Policy B: quality is authoritative).
 - **weighting_bias**: Impact score adjustment (-2 to +2, default 0)
 - **suppress**: Per-source suppression rules
@@ -569,7 +570,8 @@ Dependency management lives in `pyproject.toml`, with a hashed `requirements.loc
 - `docs/ARCHITECTURE.md` — deep dive into adapters, operators, and runtime boundaries.
 - `docs/EXECUTION_PLAN.md` — living roadmap that explains which priority band (P0–P3) is currently active.
 - `docs/P2_READINESS.md` — readiness checklist that ties release criteria back to deterministic guarantees.
-- `docs/audit/Contract_Index.md` — index of the current “contracts” (README claims) mapped to enforcing code/tests.
+- `docs/CSV_CONTRACT.md` — client network CSV format specification for facilities, lanes, and shipments.
+- `docs/audit/Contract_Index.md` — index of the current "contracts" (README claims) mapped to enforcing code/tests.
 - `docs/archive/audit/2026-01/` — archived reproducibility logs (`Repro_Log_*`), dependency reports, schema reviews, and the [`CLI_Contract_03_README_vs_Reality.md`](docs/archive/audit/2026-01/CLI_Contract_03_README_vs_Reality.md) gap analysis that validates every command documented here.
 - `docs/specs/run-record.schema.json` — JSON Schema for emitted run records (useful for downstream tooling or CI validation).
 
