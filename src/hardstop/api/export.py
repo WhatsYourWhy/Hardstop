@@ -8,10 +8,53 @@ from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
+from ..ops.run_record import artifact_hash, fingerprint_config, resolve_config_snapshot
 from ..utils.time import utc_now_z
 from .alerts_api import list_alerts
 from .brief_api import get_brief
 from .sources_api import get_sources_health, list_sources
+
+
+def _create_export_manifest(
+    export_data: Dict[str, Any],
+    artifact_refs: List[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Create a self-verifying manifest for the export bundle.
+    
+    Includes:
+    - Config fingerprint (for replayability)
+    - Artifact hashes (for verification)
+    - Export metadata
+    
+    Args:
+        export_data: The export data dictionary
+        artifact_refs: Optional list of artifact references with hashes
+        
+    Returns:
+        Manifest dictionary with config_hash, export_data_hash, artifact_hashes, etc.
+    """
+    config_snapshot = resolve_config_snapshot()
+    config_hash = fingerprint_config(config_snapshot)
+    
+    # Extract artifact hashes from artifact refs
+    artifact_hashes = []
+    if artifact_refs:
+        artifact_hashes = [ref.get("hash") for ref in artifact_refs if ref.get("hash")]
+    
+    # Also hash the export data itself for verification
+    export_data_hash = artifact_hash(export_data)
+    
+    manifest = {
+        "manifest_version": "1",
+        "export_schema_version": export_data.get("export_schema_version", "1"),
+        "exported_at_utc": export_data.get("exported_at_utc"),
+        "config_hash": config_hash,
+        "export_data_hash": export_data_hash,
+        "artifact_hashes": sorted(artifact_hashes) if artifact_hashes else [],
+        "config_snapshot": config_snapshot,  # Include full snapshot for client verification
+    }
+    return manifest
 
 
 def export_brief(
@@ -21,6 +64,7 @@ def export_brief(
     limit: int = 20,
     format: str = "json",
     out: Path | None = None,
+    include_manifest: bool = True,
 ) -> str:
     """
     Export brief data.
@@ -32,6 +76,7 @@ def export_brief(
         limit: Maximum number of alerts to return
         format: Export format ("json")
         out: Output file path (if None, returns as string)
+        include_manifest: Whether to include self-verifying manifest
         
     Returns:
         Exported data as string (if out is None) or writes to file
@@ -47,6 +92,13 @@ def export_brief(
     
     if format == "json":
         output = json.dumps(export_data, indent=2, sort_keys=True)
+        
+        # Add manifest if requested
+        if include_manifest and out:
+            manifest = _create_export_manifest(export_data)
+            manifest_path = out.parent / f"{out.stem}.manifest.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        
         if out:
             out.write_text(output, encoding="utf-8")
             return f"Exported to {out}"
@@ -64,6 +116,7 @@ def export_alerts(
     limit: int = 50,
     format: str = "json",
     out: Path | None = None,
+    include_manifest: bool = True,
 ) -> str:
     """
     Export alerts data.
@@ -77,6 +130,7 @@ def export_alerts(
         limit: Maximum number of alerts to return
         format: Export format ("json" or "csv")
         out: Output file path (if None, returns as string)
+        include_manifest: Whether to include self-verifying manifest
         
     Returns:
         Exported data as string (if out is None) or writes to file
@@ -90,6 +144,18 @@ def export_alerts(
         limit=limit,
     )
     
+    # Collect artifact hashes from alerts (incident evidence artifacts)
+    artifact_refs = []
+    for alert in alerts:
+        if alert.evidence and alert.evidence.incident_evidence:
+            incident = alert.evidence.incident_evidence
+            if incident.artifact_hash:
+                artifact_refs.append({
+                    "id": f"incident:{alert.alert_id}",
+                    "hash": incident.artifact_hash,
+                    "kind": "IncidentEvidence",
+                })
+    
     if format == "json":
         export_data = {
             "export_schema_version": "1",
@@ -97,6 +163,13 @@ def export_alerts(
             "data": [alert.model_dump() for alert in alerts],
         }
         output = json.dumps(export_data, indent=2, sort_keys=True)
+        
+        # Add manifest if requested
+        if include_manifest and out:
+            manifest = _create_export_manifest(export_data, artifact_refs=artifact_refs)
+            manifest_path = out.parent / f"{out.stem}.manifest.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        
         if out:
             out.write_text(output, encoding="utf-8")
             return f"Exported to {out}"
@@ -168,6 +241,20 @@ def export_alerts(
             writer.writerow([row.get(col, "") for col in columns])
         
         output = output_buffer.getvalue()
+        
+        # Add manifest if requested (for CSV exports too)
+        if include_manifest and out:
+            # For CSV, create a minimal export data dict for manifest
+            export_data_for_manifest = {
+                "export_schema_version": "1",
+                "exported_at_utc": utc_now_z(),
+                "format": "csv",
+                "row_count": len(alerts),
+            }
+            manifest = _create_export_manifest(export_data_for_manifest, artifact_refs=artifact_refs)
+            manifest_path = out.parent / f"{out.stem}.manifest.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        
         if out:
             out.write_text(output, encoding="utf-8", newline="")
             return f"Exported to {out}"
@@ -182,6 +269,7 @@ def export_sources(
     stale: str = "72h",
     format: str = "json",
     out: Path | None = None,
+    include_manifest: bool = True,
 ) -> str:
     """
     Export sources health data.
@@ -192,6 +280,7 @@ def export_sources(
         stale: Stale threshold (e.g., "72h", "48h")
         format: Export format ("json")
         out: Output file path (if None, returns as string)
+        include_manifest: Whether to include self-verifying manifest
         
     Returns:
         Exported data as string (if out is None) or writes to file
@@ -206,6 +295,13 @@ def export_sources(
     
     if format == "json":
         output = json.dumps(export_data, indent=2, sort_keys=True)
+        
+        # Add manifest if requested
+        if include_manifest and out:
+            manifest = _create_export_manifest(export_data)
+            manifest_path = out.parent / f"{out.stem}.manifest.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        
         if out:
             out.write_text(output, encoding="utf-8")
             return f"Exported to {out}"

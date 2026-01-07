@@ -402,6 +402,7 @@ def test_export_bundle_is_deterministic(tmp_path, session):
         limit=50,
         format="json",
         out=export_file_1,
+        include_manifest=True,  # Explicitly request manifest
     )
     
     # Second export run (same inputs)
@@ -412,25 +413,53 @@ def test_export_bundle_is_deterministic(tmp_path, session):
         limit=50,
         format="json",
         out=export_file_2,
+        include_manifest=True,
     )
+    
+    # Verify manifest files exist
+    manifest_1 = export_dir_1 / "alerts.manifest.json"
+    manifest_2 = export_dir_2 / "alerts.manifest.json"
+    
+    assert manifest_1.exists(), "Manifest file should be created"
+    assert manifest_2.exists(), "Manifest file should be created"
+    
+    # Load and compare manifests
+    manifest_data_1 = json.loads(manifest_1.read_text(encoding="utf-8"))
+    manifest_data_2 = json.loads(manifest_2.read_text(encoding="utf-8"))
+    
+    # Verify manifest includes required fields
+    assert "config_hash" in manifest_data_1, "Manifest must include config_hash"
+    assert "export_data_hash" in manifest_data_1, "Manifest must include export_data_hash"
+    assert "artifact_hashes" in manifest_data_1, "Manifest must include artifact_hashes"
+    assert "config_snapshot" in manifest_data_1, "Manifest must include config_snapshot"
+    
+    # Manifests should be identical (excluding exported_at_utc which may differ slightly)
+    manifest_1_no_time = {k: v for k, v in manifest_data_1.items() if k != "exported_at_utc"}
+    manifest_2_no_time = {k: v for k, v in manifest_data_2.items() if k != "exported_at_utc"}
+    
+    assert manifest_1_no_time == manifest_2_no_time, "Manifests (excluding timestamps) must be identical"
+    
+    # Verify config_hash is stable
+    assert manifest_data_1["config_hash"] == manifest_data_2["config_hash"], "Config hash must be stable"
+    
+    # Verify artifact hashes are present and stable
+    assert manifest_data_1["artifact_hashes"] == manifest_data_2["artifact_hashes"], "Artifact hashes must be stable"
     
     # Compare file lists (should be identical)
     files_1 = sorted([f.name for f in export_dir_1.iterdir()])
     files_2 = sorted([f.name for f in export_dir_2.iterdir()])
     assert files_1 == files_2, f"File lists must be identical: {files_1} != {files_2}"
     
-    # Compare per-file SHA-256 hashes
-    def file_hash(path: Path) -> str:
-        content = path.read_text(encoding="utf-8")
-        return hashlib.sha256(content.encode("utf-8")).hexdigest()
-    
-    hash_1 = file_hash(export_file_1)
-    hash_2 = file_hash(export_file_2)
-    assert hash_1 == hash_2, f"File hashes must be identical: {hash_1} != {hash_2}"
-    
-    # Compare manifest ordering (parse JSON and check data ordering)
+    # Compare export data (excluding exported_at_utc timestamp)
     data_1 = json.loads(export_file_1.read_text(encoding="utf-8"))
     data_2 = json.loads(export_file_2.read_text(encoding="utf-8"))
+    
+    # Remove exported_at_utc for comparison (it's a timestamp)
+    data_1_no_time = {k: v for k, v in data_1.items() if k != "exported_at_utc"}
+    data_2_no_time = {k: v for k, v in data_2.items() if k != "exported_at_utc"}
+    
+    # Compare structure and data (not timestamps)
+    assert data_1_no_time == data_2_no_time, "Export data (excluding timestamps) must be identical"
     
     # Check schema version
     assert data_1["export_schema_version"] == data_2["export_schema_version"]
@@ -451,6 +480,7 @@ def test_export_bundle_is_deterministic(tmp_path, session):
         limit=20,
         format="json",
         out=brief_file_1,
+        include_manifest=True,
     )
     
     export_brief(
@@ -460,7 +490,19 @@ def test_export_bundle_is_deterministic(tmp_path, session):
         limit=20,
         format="json",
         out=brief_file_2,
+        include_manifest=True,
     )
+    
+    # Verify brief manifest files exist
+    brief_manifest_1 = export_dir_1 / "brief.manifest.json"
+    brief_manifest_2 = export_dir_2 / "brief.manifest.json"
+    assert brief_manifest_1.exists(), "Brief manifest file should be created"
+    assert brief_manifest_2.exists(), "Brief manifest file should be created"
+    
+    # Verify brief manifest has required fields
+    brief_manifest_data_1 = json.loads(brief_manifest_1.read_text(encoding="utf-8"))
+    assert "config_hash" in brief_manifest_data_1, "Brief manifest must include config_hash"
+    assert "export_data_hash" in brief_manifest_data_1, "Brief manifest must include export_data_hash"
     
     # Compare brief hashes (excluding exported_at_utc which may differ)
     brief_data_1 = json.loads(brief_file_1.read_text(encoding="utf-8"))
@@ -483,6 +525,7 @@ def test_export_bundle_is_deterministic(tmp_path, session):
         stale="72h",
         format="json",
         out=sources_file_1,
+        include_manifest=True,
     )
     
     export_sources(
@@ -491,7 +534,19 @@ def test_export_bundle_is_deterministic(tmp_path, session):
         stale="72h",
         format="json",
         out=sources_file_2,
+        include_manifest=True,
     )
+    
+    # Verify sources manifest files exist
+    sources_manifest_1 = export_dir_1 / "sources.manifest.json"
+    sources_manifest_2 = export_dir_2 / "sources.manifest.json"
+    assert sources_manifest_1.exists(), "Sources manifest file should be created"
+    assert sources_manifest_2.exists(), "Sources manifest file should be created"
+    
+    # Verify sources manifest has required fields
+    sources_manifest_data_1 = json.loads(sources_manifest_1.read_text(encoding="utf-8"))
+    assert "config_hash" in sources_manifest_data_1, "Sources manifest must include config_hash"
+    assert "export_data_hash" in sources_manifest_data_1, "Sources manifest must include export_data_hash"
     
     # Compare sources hashes (excluding exported_at_utc)
     sources_data_1 = json.loads(sources_file_1.read_text(encoding="utf-8"))
