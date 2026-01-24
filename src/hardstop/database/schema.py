@@ -137,6 +137,7 @@ class Alert(Base):
     tier = Column(String, nullable=True)  # global, regional, local - for brief efficiency
     source_id = Column(String, nullable=True, index=True)  # Last-updating source ID - for UI efficiency
     trust_tier = Column(Integer, nullable=True)  # 1|2|3 (default 2) - source trust tier
+    diagnostics_json = Column(Text, nullable=True)  # v1.1: serialized AlertDiagnostics
 
 
 class SourceRun(Base):
@@ -172,4 +173,3 @@ class SourceRun(Base):
 def create_all(engine_url: str) -> None:
     engine = create_engine(engine_url)
     Base.metadata.create_all(engine)
-

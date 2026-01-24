@@ -1244,7 +1244,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
                     "classification", "correlation_key", "correlation_action",
                     "first_seen_utc", "last_seen_utc", "update_count",
                     "root_event_ids_json", "impact_score", "scope_json",
-                    "trust_tier", "tier", "source_id"  # v0.7
+                    "trust_tier", "tier", "source_id",  # v0.7
+                    "diagnostics_json",  # v1.1
                 ]
                 for col in alerts_required:
                     cur = conn.execute("PRAGMA table_info(alerts);")

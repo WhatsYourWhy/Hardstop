@@ -83,6 +83,7 @@ def upsert_new_alert_row(
     correlation_action: str = "CREATED",
     impact_score: int | None = None,
     scope_json: str | None = None,
+    diagnostics_json: str | None = None,
     tier: str | None = None,  # v0.7: tier for brief efficiency
     source_id: str | None = None,  # v0.7: source ID for UI efficiency
     trust_tier: int | None = None,  # v0.7: trust tier
@@ -104,6 +105,7 @@ def upsert_new_alert_row(
         correlation_action: Correlation action ("CREATED" or "UPDATED")
         impact_score: Network impact score (0-10, optional)
         scope_json: Scope as JSON string (optional)
+        diagnostics_json: AlertDiagnostics payload as JSON (optional)
         
     Returns:
         Created Alert row
@@ -128,6 +130,7 @@ def upsert_new_alert_row(
         update_count=0,
         impact_score=impact_score,
         scope_json=scope_json,
+        diagnostics_json=diagnostics_json,
         tier=tier,  # v0.7: tier for brief efficiency
         source_id=source_id,  # v0.7: source ID for UI efficiency
         trust_tier=trust_tier,  # v0.7: trust tier
@@ -147,6 +150,7 @@ def update_existing_alert_row(
     correlation_action: str = "UPDATED",
     impact_score: int | None = None,
     scope_json: str | None = None,
+    diagnostics_json: str | None = None,
     tier: str | None = None,  # v0.7: tier (from latest event)
     source_id: str | None = None,  # v0.7: source ID (from latest event)
     trust_tier: int | None = None,  # v0.7: trust tier (from latest event)
@@ -163,6 +167,7 @@ def update_existing_alert_row(
         correlation_action: Correlation action for this update (default "UPDATED")
         impact_score: New impact score (optional, updates if provided)
         scope_json: Updated scope JSON (optional, updates if provided)
+        diagnostics_json: AlertDiagnostics payload as JSON (optional)
         
     Returns:
         Updated Alert row
@@ -183,6 +188,9 @@ def update_existing_alert_row(
     
     if scope_json is not None:
         row.scope_json = scope_json  # Update scope with latest event data
+
+    if diagnostics_json is not None:
+        row.diagnostics_json = diagnostics_json
     
     # v0.7: Update tier/source_id/trust_tier from latest event (deterministic behavior)
     # Note: When a correlated alert is updated by a different tier source, the alert's

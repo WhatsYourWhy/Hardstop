@@ -371,6 +371,7 @@ def build_basic_alert(
     
     # Calculate classification based on network impact
     evidence = None
+    diagnostics_payload = None
     if session:
         scoring_now = event.get("scoring_now")
         if not isinstance(scoring_now, datetime):
@@ -450,6 +451,7 @@ def build_basic_alert(
             impact_score_rationale=rationale,
             quality_validation=quality_validation_metadata,
         )
+        diagnostics_payload = diagnostics.model_dump()
         evidence = AlertEvidence(
             diagnostics=diagnostics,
             linking_notes=event.get("linking_notes", []),
@@ -529,6 +531,7 @@ def build_basic_alert(
                 correlation_action="UPDATED",
                 impact_score=impact_score if session else None,
                 scope_json=scope_json,  # Update scope with latest event data
+                diagnostics_json=json.dumps(diagnostics_payload, default=str) if diagnostics_payload else None,
                 tier=tier,  # v0.7: update tier from latest event
                 source_id=source_id,  # v0.7: update source_id from latest event
                 trust_tier=trust_tier,  # v0.7: update trust_tier from latest event
@@ -574,6 +577,7 @@ def build_basic_alert(
                 correlation_action="CREATED",
                 impact_score=impact_score if session else None,
                 scope_json=scope_json,
+                diagnostics_json=json.dumps(diagnostics_payload, default=str) if diagnostics_payload else None,
                 tier=tier,  # v0.7: store tier for brief efficiency
                 source_id=source_id,  # v0.7: store source_id for UI efficiency
                 trust_tier=trust_tier,  # v0.7: store trust_tier
