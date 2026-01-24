@@ -7,7 +7,7 @@ from typing import List, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..database.schema import Alert
+from ..database.schema import Alert, Event, RawItem
 
 
 def find_recent_alert_by_key(
@@ -61,6 +61,55 @@ def load_root_event_ids(alert_row: Alert) -> list[str]:
         return json.loads(alert_row.root_event_ids_json)
     except (json.JSONDecodeError, TypeError):
         return []
+
+
+def get_first_seen_provenance(
+    session: Session,
+    alert_row: Alert,
+) -> tuple[Optional[str], Optional[str]]:
+    """Get first-seen source_id and tier for an alert based on root events.
+
+    Uses root_event_ids to locate the earliest available ingest timestamp from
+    linked raw_items (fetched_at_utc > published_at_utc > event_time_utc).
+    Returns (source_id, tier) if available, otherwise (None, None).
+    """
+    root_event_ids = load_root_event_ids(alert_row)
+    if not root_event_ids:
+        return None, None
+
+    rows = (
+        session.query(Event, RawItem)
+        .outerjoin(RawItem, Event.raw_id == RawItem.raw_id)
+        .filter(Event.event_id.in_(root_event_ids))
+        .all()
+    )
+    if not rows:
+        return None, None
+
+    best_seen_at = None
+    best_source_id = None
+    best_tier = None
+    for event_row, raw_row in rows:
+        seen_at = None
+        if raw_row:
+            seen_at = raw_row.fetched_at_utc or raw_row.published_at_utc
+            if not seen_at:
+                seen_at = None
+        if not seen_at:
+            seen_at = event_row.event_time_utc
+
+        if not seen_at:
+            continue
+
+        if best_seen_at is None or str(seen_at) < str(best_seen_at):
+            best_seen_at = seen_at
+            best_source_id = raw_row.source_id if raw_row else event_row.source_id
+            best_tier = raw_row.tier if raw_row else None
+
+    if best_seen_at is None:
+        return None, None
+
+    return best_source_id, best_tier
 
 
 def save_root_event_ids(alert_row: Alert, ids: list[str]) -> None:

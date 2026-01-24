@@ -14,7 +14,11 @@ from ..alerts.alert_models import (
     IncidentEvidenceSummary,
     HardstopAlert,
 )
-from ..database.alert_repo import load_root_event_ids, query_recent_alerts
+from ..database.alert_repo import (
+    get_first_seen_provenance,
+    load_root_event_ids,
+    query_recent_alerts,
+)
 from ..output.incidents.evidence import load_incident_evidence_summary
 from .models import AlertDetailDTO, AlertProvenance
 
@@ -195,11 +199,12 @@ def get_alert_detail(
     
     # Build provenance (minimal - only root_event_count for now)
     root_event_ids = load_root_event_ids(alert_row)
+    first_seen_source_id, first_seen_tier = get_first_seen_provenance(session, alert_row)
     provenance = AlertProvenance(
         root_event_count=len(root_event_ids),
         root_event_ids=root_event_ids if len(root_event_ids) <= 10 else None,  # Only include if small
-        first_seen_source_id=alert_row.source_id,  # Last updater, not first - but close enough for now
-        first_seen_tier=alert_row.tier,  # Last updater tier, not first - but close enough for now
+        first_seen_source_id=first_seen_source_id,
+        first_seen_tier=first_seen_tier,
     )
     
     # Source runs summary (defer for now - would require source_run_repo query)
