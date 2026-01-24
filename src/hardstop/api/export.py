@@ -42,8 +42,11 @@ def _create_export_manifest(
     if artifact_refs:
         artifact_hashes = [ref.get("hash") for ref in artifact_refs if ref.get("hash")]
     
-    # Also hash the export data itself for verification
-    export_data_hash = artifact_hash(export_data)
+    # Also hash the export data itself for verification.
+    # Drop exported_at_utc so manifests remain stable across identical exports.
+    export_data_for_hash = dict(export_data)
+    export_data_for_hash.pop("exported_at_utc", None)
+    export_data_hash = artifact_hash(export_data_for_hash)
     
     manifest = {
         "manifest_version": "1",
@@ -82,6 +85,22 @@ def export_brief(
         Exported data as string (if out is None) or writes to file
     """
     brief_data = get_brief(session, since=since, include_class0=include_class0, limit=limit)
+    stable_generated_at = None
+    for section in ("top", "updated", "created"):
+        for alert in brief_data.get(section, []):
+            timestamp = alert.get("last_seen_utc") or alert.get("first_seen_utc")
+            if not timestamp:
+                continue
+            try:
+                parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if stable_generated_at is None or parsed > stable_generated_at:
+                stable_generated_at = parsed
+    if stable_generated_at is not None:
+        brief_data["generated_at_utc"] = stable_generated_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     
     # Wrap in export schema
     export_data = {
@@ -182,9 +201,8 @@ def export_alerts(
         
         alert_ids = [alert.alert_id for alert in alerts]
         alert_rows = {}
-        if alert_ids:
-            for alert_row in alert_repo.find_alerts_by_ids(session, alert_ids):
-                alert_rows[alert_row.alert_id] = alert_row
+        for alert_row in alert_repo.find_alerts_by_ids(session, alert_ids):
+            alert_rows[alert_row.alert_id] = alert_row
         
         columns = [
             "alert_id",
@@ -281,7 +299,10 @@ def export_sources(
     Returns:
         Exported data as string (if out is None) or writes to file
     """
-    sources_health = get_sources_health(session, lookback=lookback, stale=stale)
+    try:
+        sources_health = get_sources_health(session, lookback=lookback, stale=stale)
+    except FileNotFoundError:
+        sources_health = []
     
     export_data = {
         "export_schema_version": "1",
