@@ -124,9 +124,6 @@ def ensure_event_external_fields(sqlite_path: str) -> None:
             if not _column_exists(conn, "events", col):
                 conn.execute(f"ALTER TABLE events ADD COLUMN {col} {coltype};")
         # Create indexes for new fields
-        if not _column_exists(conn, "events", "source_id"):
-            # Index will be created by ALTER TABLE above, but we check to avoid errors
-            pass
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_source_id ON events(source_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_raw_id ON events(raw_id);")
         conn.commit()
