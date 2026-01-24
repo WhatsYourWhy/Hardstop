@@ -193,6 +193,23 @@ def test_alert_reconstruction_round_trip(session):
         "shipments_truncated": False,
     })
     
+    diagnostics_payload = {
+        "link_confidence": {"facility": 0.72, "lanes": 0.55},
+        "link_provenance": {"facility": "FACILITY_ID_EXACT"},
+        "shipments_total_linked": 2,
+        "shipments_truncated": False,
+        "impact_score": 8,
+        "impact_score_breakdown": ["facility:0.72", "lanes:0.55"],
+        "impact_score_rationale": {"facility": "exact match"},
+        "quality_validation": {
+            "max_allowed_classification": 2,
+            "high_impact_factors_count": 1,
+            "facility_confidence": 0.72,
+            "facility_provenance": "FACILITY_ID_EXACT",
+            "applied_policy": "B",
+        },
+    }
+
     alert_row = upsert_new_alert_row(
             session,
             alert_id=alert_id,
@@ -212,6 +229,7 @@ def test_alert_reconstruction_round_trip(session):
             correlation_action="CREATED",
             impact_score=8,
             scope_json=scope_json,
+            diagnostics_json=json.dumps(diagnostics_payload),
             tier="global",
             source_id="test_source",
             trust_tier=2,
@@ -248,9 +266,12 @@ def test_alert_reconstruction_round_trip(session):
     assert test_alert.evidence.correlation["action"] == "CREATED"
     assert test_alert.evidence.correlation["alert_id"] == alert_id
     
-    # Assert impact_score is in diagnostics
+    # Assert diagnostics payload is hydrated
     assert test_alert.evidence.diagnostics is not None
     assert test_alert.evidence.diagnostics.impact_score == 8
+    assert test_alert.evidence.diagnostics.link_confidence == diagnostics_payload["link_confidence"]
+    assert test_alert.evidence.diagnostics.link_provenance == diagnostics_payload["link_provenance"]
+    assert test_alert.evidence.diagnostics.quality_validation == diagnostics_payload["quality_validation"]
     
     # Note: tier, trust_tier, source_id, update_count, first_seen_utc, last_seen_utc
     # are stored in Alert ORM row but not yet in HardstopAlert model.

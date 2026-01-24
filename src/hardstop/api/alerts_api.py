@@ -58,13 +58,23 @@ def _alert_row_to_hardstop_alert(alert_row: "Alert") -> HardstopAlert:
         except (json.JSONDecodeError, TypeError):
             pass
     
-    # Build evidence (minimal - diagnostics not fully stored in DB yet)
-    evidence = None
-    if alert_row.impact_score is not None:
+    # Build evidence (hydrate diagnostics from stored payload when present)
+    diagnostics = None
+    if alert_row.diagnostics_json:
+        try:
+            diagnostics_payload = json.loads(alert_row.diagnostics_json)
+            if isinstance(diagnostics_payload, dict):
+                diagnostics = AlertDiagnostics(**diagnostics_payload)
+        except (json.JSONDecodeError, TypeError):
+            diagnostics = None
+    if diagnostics is None and alert_row.impact_score is not None:
         diagnostics = AlertDiagnostics(
             impact_score=alert_row.impact_score,
             impact_score_breakdown=[],
         )
+
+    evidence = None
+    if diagnostics is not None or alert_row.correlation_key or alert_row.correlation_action:
         evidence = AlertEvidence(
             diagnostics=diagnostics,
             linking_notes=[],

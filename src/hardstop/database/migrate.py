@@ -49,6 +49,7 @@ def ensure_alert_correlation_columns(sqlite_path: str) -> None:
             ("root_event_ids_json", "TEXT"),
             ("impact_score", "INTEGER"),  # v0.5: Network impact score
             ("scope_json", "TEXT"),  # v0.5: Scope as JSON
+            ("diagnostics_json", "TEXT"),  # v1.1: serialized AlertDiagnostics payload
         ]
         for col, coltype in additions:
             if not _column_exists(conn, "alerts", col):
@@ -271,4 +272,3 @@ def ensure_source_runs_table(sqlite_path: str) -> None:
                 conn.commit()
     finally:
         conn.close()
-
