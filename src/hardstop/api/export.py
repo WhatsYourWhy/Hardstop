@@ -178,17 +178,13 @@ def export_alerts(
         # CSV: stable column order, no nested structures
         # Query Alert rows to get tier/source_id/update_count/timestamps
         # Use repo function (canonical surface rule)
-        from ..database.alert_repo import find_alert_by_id
+        from ..database import alert_repo
         
         alert_ids = [alert.alert_id for alert in alerts]
         alert_rows = {}
         if alert_ids:
-            # Batch query would be better, but for now query individually
-            # TODO: Add batch query function to alert_repo
-            for alert_id in alert_ids:
-                alert_row = find_alert_by_id(session, alert_id)
-                if alert_row:
-                    alert_rows[alert_id] = alert_row
+            for alert_row in alert_repo.find_alerts_by_ids(session, alert_ids):
+                alert_rows[alert_row.alert_id] = alert_row
         
         columns = [
             "alert_id",
@@ -308,4 +304,3 @@ def export_sources(
         return output
     else:
         raise ValueError(f"Unsupported format: {format}")
-

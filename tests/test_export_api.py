@@ -80,6 +80,34 @@ def test_export_alerts_csv_has_required_columns_and_row_count(session):
     assert len(csv_lines) == len(alerts) + 1, f"CSV row count mismatch: expected {len(alerts) + 1} (header + {len(alerts)} rows), got {len(csv_lines)}"
 
 
+def test_export_alerts_csv_uses_batch_repo_query(session, monkeypatch):
+    """Test that export alerts CSV uses the batch repo query instead of per-alert lookups."""
+    from hardstop.api.alerts_api import list_alerts
+    from hardstop.database import alert_repo
+
+    alerts = list_alerts(session, since="24h", limit=50)
+    alert_ids = [alert.alert_id for alert in alerts]
+
+    called = {"count": 0, "ids": []}
+    original_find_alerts_by_ids = alert_repo.find_alerts_by_ids
+
+    def wrapped_find_alerts_by_ids(session_arg, alert_ids_arg):
+        called["count"] += 1
+        called["ids"] = list(alert_ids_arg)
+        return original_find_alerts_by_ids(session_arg, alert_ids_arg)
+
+    def fail_find_alert_by_id(*args, **kwargs):
+        raise AssertionError("find_alert_by_id should not be called for CSV export")
+
+    monkeypatch.setattr(alert_repo, "find_alerts_by_ids", wrapped_find_alerts_by_ids)
+    monkeypatch.setattr(alert_repo, "find_alert_by_id", fail_find_alert_by_id)
+
+    export_alerts(session, since="24h", limit=50, format="csv")
+
+    assert called["count"] == 1, "Batch repo query should be called exactly once"
+    assert set(called["ids"]) == set(alert_ids), "Batch repo query should receive all alert IDs"
+
+
 def test_get_brief_is_stable_sort_order(session):
     """Test that get_brief returns alerts in stable sort order."""
     from hardstop.database.alert_repo import upsert_new_alert_row

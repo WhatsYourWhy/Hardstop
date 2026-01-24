@@ -320,3 +320,19 @@ def find_alert_by_id(session: Session, alert_id: str) -> Optional[Alert]:
         Alert row or None if not found
     """
     return session.query(Alert).filter(Alert.alert_id == alert_id).first()
+
+
+def find_alerts_by_ids(session: Session, alert_ids: List[str]) -> List[Alert]:
+    """
+    Find alerts by a list of IDs.
+
+    Args:
+        session: SQLAlchemy session
+        alert_ids: Alert IDs
+
+    Returns:
+        Alert rows matching the IDs
+    """
+    if not alert_ids:
+        return []
+    return session.query(Alert).filter(Alert.alert_id.in_(alert_ids)).all()
