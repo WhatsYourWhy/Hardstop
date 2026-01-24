@@ -112,6 +112,8 @@ def ensure_event_external_fields(sqlite_path: str) -> None:
     """
     conn = sqlite3.connect(sqlite_path)
     try:
+        if not _table_exists(conn, "events"):
+            return
         additions: List[Tuple[str, str]] = [
             ("source_id", "TEXT"),
             ("raw_id", "TEXT"),

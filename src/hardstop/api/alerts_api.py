@@ -27,6 +27,46 @@ if TYPE_CHECKING:
     from ..database.schema import Alert
 
 
+def _coalesce_diagnostics_payload(alert_row: "Alert") -> Optional[dict]:
+    diagnostics_payload = None
+    if alert_row.diagnostics_json:
+        try:
+            diagnostics_payload = json.loads(alert_row.diagnostics_json)
+        except (json.JSONDecodeError, TypeError):
+            diagnostics_payload = None
+
+    if diagnostics_payload is None:
+        if alert_row.impact_score is None and not alert_row.scope_json:
+            return None
+        diagnostics_payload = {}
+
+    if not isinstance(diagnostics_payload, dict):
+        diagnostics_payload = {}
+
+    scope_payload = {}
+    if alert_row.scope_json:
+        try:
+            scope_payload = json.loads(alert_row.scope_json) or {}
+        except (json.JSONDecodeError, TypeError):
+            scope_payload = {}
+
+    if "shipments_total_linked" not in diagnostics_payload and "shipments_total_linked" in scope_payload:
+        diagnostics_payload["shipments_total_linked"] = scope_payload.get("shipments_total_linked", 0)
+    if "shipments_truncated" not in diagnostics_payload and "shipments_truncated" in scope_payload:
+        diagnostics_payload["shipments_truncated"] = scope_payload.get("shipments_truncated", False)
+
+    diagnostics_payload.setdefault("link_confidence", {})
+    diagnostics_payload.setdefault("link_provenance", {})
+    diagnostics_payload.setdefault("quality_validation", {})
+    diagnostics_payload.setdefault("impact_score", alert_row.impact_score or 0)
+    diagnostics_payload.setdefault("impact_score_breakdown", [])
+    diagnostics_payload.setdefault("impact_score_rationale", {})
+    diagnostics_payload.setdefault("shipments_total_linked", 0)
+    diagnostics_payload.setdefault("shipments_truncated", False)
+
+    return diagnostics_payload
+
+
 def _alert_row_to_hardstop_alert(alert_row: "Alert") -> HardstopAlert:
     """Convert Alert ORM row to HardstopAlert Pydantic model."""
     # Load scope from JSON
@@ -65,18 +105,9 @@ def _alert_row_to_hardstop_alert(alert_row: "Alert") -> HardstopAlert:
     
     # Build evidence (hydrate diagnostics from stored payload when present)
     diagnostics = None
-    if alert_row.diagnostics_json:
-        try:
-            diagnostics_payload = json.loads(alert_row.diagnostics_json)
-            if isinstance(diagnostics_payload, dict):
-                diagnostics = AlertDiagnostics(**diagnostics_payload)
-        except (json.JSONDecodeError, TypeError):
-            diagnostics = None
-    if diagnostics is None and alert_row.impact_score is not None:
-        diagnostics = AlertDiagnostics(
-            impact_score=alert_row.impact_score,
-            impact_score_breakdown=[],
-        )
+    diagnostics_payload = _coalesce_diagnostics_payload(alert_row)
+    if diagnostics_payload is not None:
+        diagnostics = AlertDiagnostics(**diagnostics_payload)
 
     evidence = None
     if diagnostics is not None or alert_row.correlation_key or alert_row.correlation_action:

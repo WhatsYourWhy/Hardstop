@@ -25,6 +25,7 @@ from ..database.alert_repo import (
     update_existing_alert_row,
     upsert_new_alert_row,
 )
+from ..database.raw_item_repo import get_raw_item_by_id
 
 
 def _dedupe_preserve_order(items: List[str]) -> List[str]:
@@ -36,6 +37,15 @@ def _dedupe_preserve_order(items: List[str]) -> List[str]:
         seen.add(item)
         result.append(item)
     return result
+
+
+def _resolve_first_seen_utc(event: Dict[str, Any], session: Optional[Session]) -> Optional[str]:
+    raw_id = event.get("raw_id")
+    if raw_id and session is not None:
+        raw_item = get_raw_item_by_id(session, raw_id)
+        if raw_item:
+            return raw_item.fetched_at_utc or raw_item.published_at_utc or event.get("event_time_utc")
+    return event.get("event_time_utc") or event.get("published_at_utc")
 
 
 def _detect_high_impact_keywords(text: str) -> Tuple[bool, List[str]]:
@@ -452,6 +462,9 @@ def build_basic_alert(
             quality_validation=quality_validation_metadata,
         )
         diagnostics_payload = diagnostics.model_dump()
+        diagnostics_payload.setdefault("link_confidence", {})
+        diagnostics_payload.setdefault("link_provenance", {})
+        diagnostics_payload.setdefault("quality_validation", {})
         evidence = AlertEvidence(
             diagnostics=diagnostics,
             linking_notes=event.get("linking_notes", []),
@@ -506,6 +519,7 @@ def build_basic_alert(
     # Correlation: Build key (always - it's a property of the event)
     correlation_key = build_correlation_key(event)
     existing_alert = None
+    first_seen_utc = _resolve_first_seen_utc(event, session)
     
     # Correlation persistence: only when session is available
     # Note: Correlation key is always computed for debugging/replay,
@@ -532,6 +546,7 @@ def build_basic_alert(
                 impact_score=impact_score if session else None,
                 scope_json=scope_json,  # Update scope with latest event data
                 diagnostics_json=json.dumps(diagnostics_payload, default=str) if diagnostics_payload else None,
+                first_seen_utc=first_seen_utc,
                 tier=tier,  # v0.7: update tier from latest event
                 source_id=source_id,  # v0.7: update source_id from latest event
                 trust_tier=trust_tier,  # v0.7: update trust_tier from latest event
@@ -578,6 +593,7 @@ def build_basic_alert(
                 impact_score=impact_score if session else None,
                 scope_json=scope_json,
                 diagnostics_json=json.dumps(diagnostics_payload, default=str) if diagnostics_payload else None,
+                first_seen_utc=first_seen_utc,
                 tier=tier,  # v0.7: store tier for brief efficiency
                 source_id=source_id,  # v0.7: store source_id for UI efficiency
                 trust_tier=trust_tier,  # v0.7: store trust_tier
