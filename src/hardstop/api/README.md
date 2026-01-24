@@ -57,7 +57,7 @@ The API functions below are the only supported read surfaces for P3 reporting an
   - `alert`: `HardstopAlert`
   - `provenance`: `AlertProvenance` (`root_event_count`, optional `root_event_ids`, `first_seen_source_id`, `first_seen_tier`)
   - `current_tier` / `current_source_id`: reflect the last updater
-  - `source_runs_summary`: reserved for future source-run hydration (currently `None`)
+  - `source_runs_summary`: populated when `alert.source_id` is available (latest source health metrics)
 - Use when building detail pages or incident exports that need provenance alongside alert fields.
 
 ### `sources_api.get_sources_health`

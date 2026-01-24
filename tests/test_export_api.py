@@ -89,17 +89,17 @@ def test_export_alerts_csv_uses_batch_repo_query(session, monkeypatch):
     alert_ids = [alert.alert_id for alert in alerts]
 
     called = {"count": 0, "ids": []}
-    original_find_alerts_by_ids = alert_repo.find_alerts_by_ids
+    original_find_alerts_by_ids_map = alert_repo.find_alerts_by_ids_map
 
-    def wrapped_find_alerts_by_ids(session_arg, alert_ids_arg):
+    def wrapped_find_alerts_by_ids_map(session_arg, alert_ids_arg):
         called["count"] += 1
         called["ids"] = list(alert_ids_arg)
-        return original_find_alerts_by_ids(session_arg, alert_ids_arg)
+        return original_find_alerts_by_ids_map(session_arg, alert_ids_arg)
 
     def fail_find_alert_by_id(*args, **kwargs):
         raise AssertionError("find_alert_by_id should not be called for CSV export")
 
-    monkeypatch.setattr(alert_repo, "find_alerts_by_ids", wrapped_find_alerts_by_ids)
+    monkeypatch.setattr(alert_repo, "find_alerts_by_ids_map", wrapped_find_alerts_by_ids_map)
     monkeypatch.setattr(alert_repo, "find_alert_by_id", fail_find_alert_by_id)
 
     export_alerts(session, since="24h", limit=50, format="csv")

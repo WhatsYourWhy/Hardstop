@@ -101,7 +101,7 @@ def get_first_seen_provenance(
         if not seen_at:
             continue
 
-        if best_seen_at is None or str(seen_at) < str(best_seen_at):
+        if best_seen_at is None or _is_timestamp_before(seen_at, best_seen_at):
             best_seen_at = seen_at
             best_source_id = raw_row.source_id if raw_row else event_row.source_id
             best_tier = raw_row.tier if raw_row else None
@@ -110,6 +110,29 @@ def get_first_seen_provenance(
         return None, None
 
     return best_source_id, best_tier
+
+
+def _parse_timestamp(value: object) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _is_timestamp_before(candidate: object, current: object) -> bool:
+    candidate_dt = _parse_timestamp(candidate)
+    current_dt = _parse_timestamp(current)
+    if candidate_dt and current_dt:
+        return candidate_dt < current_dt
+    if candidate_dt and not current_dt:
+        return True
+    if not candidate_dt and current_dt:
+        return False
+    return str(candidate) < str(current)
 
 
 def save_root_event_ids(alert_row: Alert, ids: list[str]) -> None:
@@ -133,6 +156,7 @@ def upsert_new_alert_row(
     impact_score: int | None = None,
     scope_json: str | None = None,
     diagnostics_json: str | None = None,
+    first_seen_utc: str | None = None,
     tier: str | None = None,  # v0.7: tier for brief efficiency
     source_id: str | None = None,  # v0.7: source ID for UI efficiency
     trust_tier: int | None = None,  # v0.7: trust tier
@@ -155,12 +179,14 @@ def upsert_new_alert_row(
         impact_score: Network impact score (0-10, optional)
         scope_json: Scope as JSON string (optional)
         diagnostics_json: AlertDiagnostics payload as JSON (optional)
+        first_seen_utc: Override for first_seen_utc timestamp (optional)
         
     Returns:
         Created Alert row
     """
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()  # Store as ISO 8601 string for consistency
+    first_seen_value = first_seen_utc or now_iso
 
     row = Alert(
         alert_id=alert_id,
@@ -174,7 +200,7 @@ def upsert_new_alert_row(
         recommended_actions=recommended_actions,
         correlation_key=correlation_key,
         correlation_action=correlation_action,
-        first_seen_utc=now_iso,  # ISO string for consistent storage
+        first_seen_utc=first_seen_value,  # ISO string for consistent storage
         last_seen_utc=now_iso,   # ISO string for consistent storage
         update_count=0,
         impact_score=impact_score,
@@ -200,6 +226,7 @@ def update_existing_alert_row(
     impact_score: int | None = None,
     scope_json: str | None = None,
     diagnostics_json: str | None = None,
+    first_seen_utc: str | None = None,
     tier: str | None = None,  # v0.7: tier (from latest event)
     source_id: str | None = None,  # v0.7: source ID (from latest event)
     trust_tier: int | None = None,  # v0.7: trust tier (from latest event)
@@ -217,6 +244,7 @@ def update_existing_alert_row(
         impact_score: New impact score (optional, updates if provided)
         scope_json: Updated scope JSON (optional, updates if provided)
         diagnostics_json: AlertDiagnostics payload as JSON (optional)
+        first_seen_utc: Override for earliest seen timestamp (optional)
         
     Returns:
         Updated Alert row
@@ -231,6 +259,10 @@ def update_existing_alert_row(
     row.correlation_action = correlation_action  # Store fact about this update
     row.last_seen_utc = now_iso  # ISO string for consistent storage
     row.update_count = (row.update_count or 0) + 1
+
+    if first_seen_utc:
+        if row.first_seen_utc is None or _is_timestamp_before(first_seen_utc, row.first_seen_utc):
+            row.first_seen_utc = first_seen_utc
     
     if impact_score is not None:
         row.impact_score = impact_score
@@ -336,3 +368,9 @@ def find_alerts_by_ids(session: Session, alert_ids: List[str]) -> List[Alert]:
     if not alert_ids:
         return []
     return session.query(Alert).filter(Alert.alert_id.in_(alert_ids)).all()
+
+
+def find_alerts_by_ids_map(session: Session, alert_ids: List[str]) -> dict[str, Alert]:
+    """Find alerts by ID and return a mapping keyed by alert_id."""
+    rows = find_alerts_by_ids(session, alert_ids)
+    return {row.alert_id: row for row in rows}

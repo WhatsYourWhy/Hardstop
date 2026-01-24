@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -37,7 +37,7 @@ def link_to_network(
     session: Optional[Session],
     days_ahead: int = 30,
     *,
-    now: Optional[datetime] = None,
+    now: datetime,
 ) -> Dict:
     """
     Link an event to actual network data by:
@@ -50,7 +50,7 @@ def link_to_network(
         event: Event dict with city, state, country, or facilities already set
         session: SQLAlchemy session
         days_ahead: How many days ahead to look for shipments (default 30)
-        now: Optional datetime to anchor shipment filtering for deterministic runs.
+        now: Datetime to anchor shipment filtering for deterministic runs.
     
     Returns:
         Updated event dict with facilities and shipments populated
@@ -127,7 +127,7 @@ def link_to_network(
     matched_shipment_ids = []
     if matched_facility_ids:
         # Calculate date threshold
-        current_time = now or datetime.now(timezone.utc)
+        current_time = now
         today = current_time.date()
         future_date = today + timedelta(days=days_ahead)
         
@@ -206,6 +206,7 @@ class EntityLinkingOperator:
         canonicalize_time=None,
         run_id: Optional[str] = None,
         link_now: Optional[datetime] = None,
+        clock: Optional[Callable[[], datetime]] = None,
         dest_dir: str = "run_records",
     ) -> None:
         self.mode = mode
@@ -213,6 +214,7 @@ class EntityLinkingOperator:
         self.canonicalize_time = canonicalize_time
         self.run_id = run_id
         self.link_now = link_now
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.dest_dir = dest_dir
 
     def run(
@@ -224,7 +226,7 @@ class EntityLinkingOperator:
         emit_record: bool = True,
     ) -> Tuple[Dict, Optional[object]]:
         started_at = utc_now_z()
-        link_time = now or self.link_now
+        link_time = now or self.link_now or self.clock()
         linked_event = link_to_network(dict(event), session, days_ahead, now=link_time)
 
         if not emit_record:

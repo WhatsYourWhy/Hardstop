@@ -200,9 +200,7 @@ def export_alerts(
         from ..database import alert_repo
         
         alert_ids = [alert.alert_id for alert in alerts]
-        alert_rows = {}
-        for alert_row in alert_repo.find_alerts_by_ids(session, alert_ids):
-            alert_rows[alert_row.alert_id] = alert_row
+        alert_rows = alert_repo.find_alerts_by_ids_map(session, alert_ids)
         
         columns = [
             "alert_id",
