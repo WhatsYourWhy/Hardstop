@@ -330,6 +330,24 @@ hardstop brief --today --format json
 hardstop brief --today --since 72h
 ```
 
+#### Export bundles
+
+```bash
+# Export brief JSON (prints to stdout unless --out is set)
+hardstop export brief --since 24h --limit 20 --out brief.json
+
+# Export alerts as JSON or CSV
+hardstop export alerts --since 24h --format json --out alerts.json
+hardstop export alerts --since 24h --format csv --out alerts.csv
+
+# Export sources health JSON
+hardstop export sources --lookback 7d --stale 72h --out sources.json
+```
+
+When `--out` is supplied, Hardstop writes a sidecar `*.manifest.json` file with
+config fingerprints and export hashes to support verification. The full export
+schema is documented in `docs/specs/export.schema.md`.
+
 #### Health and Diagnostics
 
 ```bash

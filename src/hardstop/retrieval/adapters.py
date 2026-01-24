@@ -233,10 +233,12 @@ class NWSAlertsAdapter(SourceAdapter):
                 bytes_downloaded=bytes_downloaded,
             )
             
-        except requests.RequestException as e:
-            raise RuntimeError(f"Failed to fetch NWS alerts from {self.url}: {e}") from e
+        except requests.exceptions.JSONDecodeError as e:
+            raise RuntimeError(f"Failed to parse NWS alerts response from {self.url}: {e}") from e
         except (json.JSONDecodeError, KeyError) as e:
             raise RuntimeError(f"Failed to parse NWS alerts response from {self.url}: {e}") from e
+        except requests.RequestException as e:
+            raise RuntimeError(f"Failed to fetch NWS alerts from {self.url}: {e}") from e
 
 
 class FEMAAdapter(SourceAdapter):
@@ -270,6 +272,8 @@ class FEMAAdapter(SourceAdapter):
                 bytes_downloaded=bytes_downloaded,
             )
                 
+        except requests.exceptions.JSONDecodeError:
+            raise
         except requests.RequestException as e:
             raise RuntimeError(f"Failed to fetch FEMA feed from {self.url}: {e}") from e
     
