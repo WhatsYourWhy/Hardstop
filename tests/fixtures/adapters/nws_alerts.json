@@ -1,0 +1,29 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "nws-1",
+        "headline": "Winter Weather Advisory",
+        "event": "Winter Weather",
+        "severity": "Moderate",
+        "urgency": "Expected",
+        "certainty": "Likely",
+        "areaDesc": "Somewhere County",
+        "description": "Snow expected.",
+        "instruction": "Use caution.",
+        "sent": "2024-01-15T12:00:00-05:00",
+        "effective": "2024-01-15T12:00:00-05:00",
+        "expires": "2024-01-16T12:00:00-05:00",
+        "status": "Actual",
+        "messageType": "Alert",
+        "web_url": "https://alerts.weather.gov/nws-1"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-77.0, 38.9]
+      }
+    }
+  ]
+}

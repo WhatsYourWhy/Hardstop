@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "id": "fema-1",
+      "title": "FEMA Alert One",
+      "url": "https://example.com/fema/1",
+      "published": "2024-02-01T15:00:00Z"
+    },
+    {
+      "id": "fema-2",
+      "headline": "FEMA Alert Two",
+      "web_url": "https://example.com/fema/2",
+      "sent": "2024-02-02T10:30:00+00:00"
+    }
+  ]
+}

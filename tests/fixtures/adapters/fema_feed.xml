@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>FEMA Alerts</title>
+    <item>
+      <title>FEMA RSS Alert</title>
+      <link>https://example.com/fema/rss/1</link>
+      <guid>fema-rss-1</guid>
+      <pubDate>Wed, 03 Jan 2024 14:00:00 GMT</pubDate>
+      <description>FEMA RSS summary.</description>
+    </item>
+  </channel>
+</rss>
