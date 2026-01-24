@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
 
 from sqlalchemy import or_
@@ -32,7 +32,13 @@ def attach_dummy_entities(event: Dict) -> Dict:
     return event
 
 
-def link_to_network(event: Dict, session: Optional[Session], days_ahead: int = 30) -> Dict:
+def link_to_network(
+    event: Dict,
+    session: Optional[Session],
+    days_ahead: int = 30,
+    *,
+    now: Optional[datetime] = None,
+) -> Dict:
     """
     Link an event to actual network data by:
     1. Looking up facilities by city/state or facility_id
@@ -44,6 +50,7 @@ def link_to_network(event: Dict, session: Optional[Session], days_ahead: int = 3
         event: Event dict with city, state, country, or facilities already set
         session: SQLAlchemy session
         days_ahead: How many days ahead to look for shipments (default 30)
+        now: Optional datetime to anchor shipment filtering for deterministic runs.
     
     Returns:
         Updated event dict with facilities and shipments populated
@@ -120,7 +127,8 @@ def link_to_network(event: Dict, session: Optional[Session], days_ahead: int = 3
     matched_shipment_ids = []
     if matched_facility_ids:
         # Calculate date threshold
-        today = datetime.now().date()
+        current_time = now or datetime.now(timezone.utc)
+        today = current_time.date()
         future_date = today + timedelta(days=days_ahead)
         
         # Find lanes originating from matched facilities
@@ -197,12 +205,14 @@ class EntityLinkingOperator:
         config_snapshot: Optional[Dict] = None,
         canonicalize_time=None,
         run_id: Optional[str] = None,
+        link_now: Optional[datetime] = None,
         dest_dir: str = "run_records",
     ) -> None:
         self.mode = mode
         self.config_snapshot = config_snapshot or resolve_config_snapshot()
         self.canonicalize_time = canonicalize_time
         self.run_id = run_id
+        self.link_now = link_now
         self.dest_dir = dest_dir
 
     def run(
@@ -210,10 +220,12 @@ class EntityLinkingOperator:
         event: Dict,
         session: Optional[Session],
         days_ahead: int = 30,
+        now: Optional[datetime] = None,
         emit_record: bool = True,
     ) -> Tuple[Dict, Optional[object]]:
         started_at = utc_now_z()
-        linked_event = link_to_network(dict(event), session, days_ahead)
+        link_time = now or self.link_now
+        linked_event = link_to_network(dict(event), session, days_ahead, now=link_time)
 
         if not emit_record:
             return linked_event, None
