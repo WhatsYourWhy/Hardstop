@@ -19,8 +19,9 @@ from ..database.alert_repo import (
     load_root_event_ids,
     query_recent_alerts,
 )
+from ..database.source_run_repo import get_source_health
 from ..output.incidents.evidence import load_incident_evidence_summary
-from .models import AlertDetailDTO, AlertProvenance
+from .models import AlertDetailDTO, AlertProvenance, SourceRunsSummary
 
 if TYPE_CHECKING:
     from ..database.schema import Alert
@@ -207,8 +208,17 @@ def get_alert_detail(
         first_seen_tier=first_seen_tier,
     )
     
-    # Source runs summary (defer for now - would require source_run_repo query)
     source_runs_summary = None
+    if alert_row.source_id:
+        health = get_source_health(session, alert_row.source_id)
+        source_runs_summary = SourceRunsSummary(
+            source_id=alert_row.source_id,
+            last_success_utc=health.get("last_success_utc"),
+            success_rate=health.get("success_rate", 0.0),
+            last_status_code=health.get("last_status_code"),
+            last_items_new=health.get("last_items_new", 0),
+            last_ingest=health.get("last_ingest"),
+        )
     
     return AlertDetailDTO(
         alert=alert,
