@@ -148,6 +148,7 @@ _Status: Delivered with deterministic evidence + replay coverage (Jan 2026)._
 
 - **Brief v2**: restructure Markdown/JSON briefs to consume the new artifacts,
   add badges for trust tiers, and expose suppression rationale for each alert.
+  See `docs/specs/brief-v2.md` for the reporting and export bundle contract.
 - **Export API / bundles**: deliver read-only exports (JSON bundle + CSV) so
   downstream tools can ingest Hardstop outputs without touching the DB.
 - **Chat & work tracker sinks**: document Slack webhook + Linear issue mirroring
@@ -177,6 +178,8 @@ _Status: Delivered with deterministic evidence + replay coverage (Jan 2026)._
 - **P1** source health, suppression explainability, canonical registry plumbing, and adapter diagnostics are shipped with persisted telemetry + CLI coverage, shifting focus to maintenance and telemetry tuning.
 - **P2** canonicalization v2, scoring rationale, correlation evidence artifacts, and the incident replay CLI are delivered with end-to-end replay + artifact regression tests.
 - **P3** reporting/export/CI integrations remain the next frontier; daily briefs and export bundle specs still rely on ad-hoc scripts awaiting prioritization.
+  The `docs/specs/brief-v2.md` outline defines the deterministic, read-only brief
+  and export bundle surface that P3 work must implement.
 
 This plan should be revisited at the end of every release cycle to confirm
 assumptions, retire completed work, and reprioritize based on new risks.
