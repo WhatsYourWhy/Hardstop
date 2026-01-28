@@ -11,16 +11,16 @@ class AlertAction(BaseModel):
 
 
 class AlertScope(BaseModel):
-    facilities: list[str] = []
-    lanes: list[str] = []
-    shipments: list[str] = []
+    facilities: list[str] = Field(default_factory=list)
+    lanes: list[str] = Field(default_factory=list)
+    shipments: list[str] = Field(default_factory=list)
 
 
 class AlertImpactAssessment(BaseModel):
     time_risk_days: float | None = None
     revenue_at_risk: float | None = None
-    customers_affected: list[str] = []
-    qualitative_impact: list[str] = []
+    customers_affected: list[str] = Field(default_factory=list)
+    qualitative_impact: list[str] = Field(default_factory=list)
 
 
 class AlertDiagnostics(BaseModel):
@@ -29,14 +29,14 @@ class AlertDiagnostics(BaseModel):
     This is non-decisional evidence - it explains how the system arrived at
     its decisions but does not itself constitute a decision.
     """
-    link_confidence: dict[str, float] = {}
-    link_provenance: dict[str, str] = {}
+    link_confidence: dict[str, float] = Field(default_factory=dict)
+    link_provenance: dict[str, str] = Field(default_factory=dict)
     shipments_total_linked: int = 0
     shipments_truncated: bool = False
     impact_score: int = 0
-    impact_score_breakdown: list[str] = []
-    impact_score_rationale: dict[str, object] = {}
-    quality_validation: dict[str, object] = {}  # Quality validation metadata (max_allowed_classification, high_impact_factors, etc.)
+    impact_score_breakdown: list[str] = Field(default_factory=list)
+    impact_score_rationale: dict[str, object] = Field(default_factory=dict)
+    quality_validation: dict[str, object] = Field(default_factory=dict)  # Quality validation metadata (max_allowed_classification, high_impact_factors, etc.)
 
 
 class IncidentEvidenceSummary(BaseModel):
@@ -58,7 +58,7 @@ class AlertEvidence(BaseModel):
     When LLM reasoning is added later, it will go here as evidence, not as decisions.
     """
     diagnostics: Optional[AlertDiagnostics] = None
-    linking_notes: list[str] = []  # Human-readable notes from entity linking process
+    linking_notes: list[str] = Field(default_factory=list)  # Human-readable notes from entity linking process
     correlation: Optional[dict[str, str | int | None]] = None  # Structured correlation info
     # Format: {"key": str, "action": "CREATED" | "UPDATED" | None, "alert_id": str | None}
     # When session is None, action and alert_id are None (key is always computed)
