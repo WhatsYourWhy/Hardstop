@@ -10,6 +10,19 @@ from hardstop.database.raw_item_repo import save_raw_item
 from hardstop.runners.ingest_external import main as ingest_external_main
 
 
+@pytest.fixture(autouse=True)
+def _mock_ingest_config(mocker):
+    """Prevent ingest_external from loading real config files."""
+    mocker.patch(
+        "hardstop.runners.ingest_external.load_sources_config",
+        return_value={"defaults": {}, "tiers": {}},
+    )
+    mocker.patch(
+        "hardstop.runners.ingest_external.get_all_sources",
+        return_value=[],
+    )
+
+
 def test_fetch_creates_source_run(session):
     """Test that running fetch creates FETCH SourceRun rows."""
     # This test would require mocking the fetcher, which is complex

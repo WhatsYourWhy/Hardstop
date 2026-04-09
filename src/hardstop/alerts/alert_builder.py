@@ -82,9 +82,9 @@ def _detect_high_impact_keywords(text: str) -> Tuple[bool, List[str]]:
         (r"\b(CLOSURE|CLOSED|SHUTDOWN|SHUT\s+DOWN)\b.*\b(PLANT|FACILITY|WAREHOUSE|PORT|TERMINAL|REFINERY|DC)\b", ["CLOSURE"]),
         (r"\b(PLANT|FACILITY|WAREHOUSE|PORT|TERMINAL|REFINERY|DC)\b.*\b(CLOSURE|CLOSED|SHUTDOWN|SHUT\s+DOWN)\b", ["CLOSURE"]),
         
-        # Fire/explosion patterns
-        (r"\b(FIRE|EXPLOSION)\b.*\b(PLANT|FACILITY|WAREHOUSE|PORT|TERMINAL|REFINERY|DC)\b", ["FIRE"]),
-        (r"\b(PLANT|FACILITY|WAREHOUSE|PORT|TERMINAL|REFINERY|DC)\b.*\b(FIRE|EXPLOSION)\b", ["FIRE"]),
+        # Fire/explosion patterns (negative lookahead excludes "fire sale")
+        (r"\b(FIRE|EXPLOSION)\b(?!\s+SALE).*\b(PLANT|FACILITY|WAREHOUSE|PORT|TERMINAL|REFINERY|DC)\b", ["FIRE"]),
+        (r"\b(PLANT|FACILITY|WAREHOUSE|PORT|TERMINAL|REFINERY|DC)\b.*\b(FIRE|EXPLOSION)\b(?!\s+SALE)", ["FIRE"]),
     ]
     
     matched_patterns = []

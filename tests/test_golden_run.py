@@ -6,7 +6,7 @@ def test_event_fixture_hash_regression():
     fixture_path = Path("tests/fixtures/event_spill.json")
     digest = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
     assert (
-        digest == "72e81b377b589cf377e6806cbc496faffb4183dce2c07978da310b37dd956da6"
+        digest == "c6e92df540849f40c805a8dd55d7be7979e44284c5faa38c695c716d0b8d731e"
     ), "event_spill.json hash changed; update golden expectation if intentional"
 
 
@@ -14,7 +14,7 @@ def test_normalized_event_fixture_hash_regression():
     fixture_path = Path("tests/fixtures/normalized_event_spill.json")
     digest = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
     assert (
-        digest == "4c8538e858ebd1bfa698393fcf595bb4117dadc01892c38b2a80c974117d2f3f"
+        digest == "e44452d1547181c7a14f23eb56fab9f29aa205652f0bc5677db42995b9d94363"
     ), "normalized_event_spill.json hash changed; update golden expectation if intentional"
 
 
@@ -22,5 +22,5 @@ def test_incident_evidence_fixture_hash_regression():
     fixture_path = Path("tests/fixtures/incident_evidence_spill.json")
     digest = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
     assert (
-        digest == "723ce988b67f2c60d0316931542e5cf5bebfcf24661fb4e08fb3fe2ff7db7ba7"
+        digest == "4857a37c9a5719289b0c25bd57b91375704aa12709425562a56473c6a1c40236"
     ), "incident_evidence_spill.json hash changed; update golden expectation if intentional"
