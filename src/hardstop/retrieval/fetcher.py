@@ -80,7 +80,7 @@ class SourceFetcher:
             wait_time = min_interval - elapsed
             jitter = self._rng.uniform(0, self.jitter_seconds) if self.jitter_seconds > 0 else 0
             total_wait = wait_time + jitter
-            logger.debug(f"Rate limiting: waiting {total_wait:.2f}s for host {host}")
+            logger.debug("Rate limiting: waiting %.2fs for host %s", total_wait, host)
             time.sleep(total_wait)
         
         self._last_fetch_time[host] = time.time()
@@ -153,16 +153,16 @@ class SourceFetcher:
                 continue
             filtered_sources.append(source)
         
-        logger.info(f"Fetching from {len(filtered_sources)} sources")
+        logger.info("Fetching from %s sources", len(filtered_sources))
         
         # Parse since argument
         since_hours = None
         if since:
             since_hours = self._parse_since(since)
             if since_hours is None:
-                logger.warning(f"Invalid --since value: {since}, ignoring")
+                logger.warning("Invalid --since value: %s, ignoring", since)
             else:
-                logger.info(f"Filtering items from last {since_hours} hours")
+                logger.info("Filtering items from last %s hours", since_hours)
         
         results: List[FetchResult] = []
         fetched_at_utc = datetime.now(timezone.utc).isoformat()
@@ -192,7 +192,7 @@ class SourceFetcher:
                     adapter.max_items = max_items_per_source
                 
                 # Fetch items
-                logger.info(f"Fetching from {source_id} ({source.get('tier', 'unknown')} tier)")
+                logger.info("Fetching from %s (%s tier)", source_id, source.get('tier', 'unknown'))
                 
                 # Try to capture status code from adapter's HTTP request
                 # We need to wrap the adapter.fetch() call to catch HTTP errors
@@ -204,7 +204,7 @@ class SourceFetcher:
                     bytes_downloaded = adapter_response.bytes_downloaded or 0
                     # If we get here, fetch succeeded (even if 0 items)
                     # Zero items = SUCCESS (quiet feeds are normal)
-                    logger.info(f"Fetched {len(candidates)} items from {source_id}")
+                    logger.info("Fetched %s items from %s", len(candidates), source_id)
                 except requests.RequestException as req_e:
                     # Extract status code if available
                     if hasattr(req_e, 'response') and req_e.response is not None:
@@ -219,7 +219,7 @@ class SourceFetcher:
                     status_code = req_e.response.status_code
                 error = str(req_e)
                 status = "FAILURE"
-                logger.error(f"Failed to fetch from {source_id}: {error}", exc_info=not fail_fast)
+                logger.error("Failed to fetch from %s: %s", source_id, error, exc_info=not fail_fast)
                 
                 if fail_fast:
                     raise RuntimeError(f"Failed to fetch from {source_id}: {error}") from req_e
@@ -235,7 +235,7 @@ class SourceFetcher:
                 error = str(e)
                 status = "FAILURE"
                 # status_code may be set from chained exception above
-                logger.error(f"Failed to fetch from {source_id}: {error}", exc_info=not fail_fast)
+                logger.error("Failed to fetch from %s: %s", source_id, error, exc_info=not fail_fast)
                 
                 if fail_fast:
                     raise RuntimeError(f"Failed to fetch from {source_id}: {error}") from e
@@ -258,7 +258,7 @@ class SourceFetcher:
         
         failed_count = sum(1 for r in results if r.status == "FAILURE")
         if failed_count > 0:
-            logger.warning(f"Failed to fetch from {failed_count} sources")
+            logger.warning("Failed to fetch from %s sources", failed_count)
         
         return results
     
@@ -297,7 +297,7 @@ class SourceFetcher:
         if since:
             since_hours = self._parse_since(since)
             if since_hours is None:
-                logger.warning(f"Invalid --since value: {since}, ignoring")
+                logger.warning("Invalid --since value: %s, ignoring", since)
         
         source_url = source["url"]
         fetched_at_utc = datetime.now(timezone.utc).isoformat()
@@ -323,7 +323,7 @@ class SourceFetcher:
                 adapter.max_items = max_items
             
             # Fetch items
-            logger.info(f"Fetching from {source_id} ({source.get('tier', 'unknown')} tier)")
+            logger.info("Fetching from %s (%s tier)", source_id, source.get('tier', 'unknown'))
             
             try:
                 adapter_response = adapter.fetch(since_hours=since_hours)
@@ -331,7 +331,7 @@ class SourceFetcher:
                 if adapter_response.status_code is not None:
                     status_code = adapter_response.status_code
                 bytes_downloaded = adapter_response.bytes_downloaded or 0
-                logger.info(f"Fetched {len(candidates)} items from {source_id}")
+                logger.info("Fetched %s items from %s", len(candidates), source_id)
             except requests.RequestException as req_e:
                 if hasattr(req_e, 'response') and req_e.response is not None:
                     status_code = req_e.response.status_code
@@ -344,7 +344,7 @@ class SourceFetcher:
                 status_code = req_e.response.status_code
             error = str(req_e)
             status = "FAILURE"
-            logger.error(f"Failed to fetch from {source_id}: {error}")
+            logger.error("Failed to fetch from %s: %s", source_id, error)
             raise RuntimeError(f"Failed to fetch from {source_id}: {error}") from req_e
             
         except Exception as e:
@@ -356,7 +356,7 @@ class SourceFetcher:
             
             error = str(e)
             status = "FAILURE"
-            logger.error(f"Failed to fetch from {source_id}: {error}")
+            logger.error("Failed to fetch from %s: %s", source_id, error)
             raise RuntimeError(f"Failed to fetch from {source_id}: {error}") from e
         
         # Calculate duration

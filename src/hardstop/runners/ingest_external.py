@@ -117,11 +117,11 @@ def main(
                     try:
                         global_rules.append(SuppressionRule(**rule_dict))
                     except Exception as e:
-                        logger.warning(f"Invalid suppression rule: {rule_dict.get('id', 'unknown')} - {e}")
+                        logger.warning("Invalid suppression rule: %s - %s", rule_dict.get('id', 'unknown'), e)
         except FileNotFoundError:
             logger.debug("Suppression config not found, skipping suppression")
         except Exception as e:
-            logger.warning(f"Error loading suppression config: {e}")
+            logger.warning("Error loading suppression config: %s", e)
     
     # Get raw items for ingestion
     raw_items = get_raw_items_for_ingest(
@@ -132,7 +132,7 @@ def main(
         since_hours=since_hours,
     )
     
-    logger.info(f"Processing {len(raw_items)} raw items for ingestion")
+    logger.info("Processing %s raw items for ingestion", len(raw_items))
     
     # Group raw items by source_id (v0.9)
     items_by_source: Dict[str, List] = defaultdict(list)
@@ -256,7 +256,7 @@ def main(
                             try:
                                 source_rules.append(SuppressionRule(**rule_dict))
                             except Exception as e:
-                                logger.warning(f"Invalid source suppression rule for {raw_item.source_id}: {e}")
+                                logger.warning("Invalid source suppression rule for %s: %s", raw_item.source_id, e)
                         
                         # Evaluate suppression
                         suppression_result = evaluate_suppression(
@@ -317,7 +317,7 @@ def main(
                     session.commit()
                     source_events += 1
                     stats["events"] += 1
-                    logger.debug(f"Created event {event['event_id']} from raw_item {raw_item.raw_id}")
+                    logger.debug("Created event %s from raw_item %s", event['event_id'], raw_item.raw_id)
                     
                     # Link to network
                     event = link_event_to_network(event, session=session)
@@ -326,7 +326,7 @@ def main(
                     alert = build_basic_alert(event, session=session)
                     source_alerts += 1
                     stats["alerts"] += 1
-                    logger.debug(f"Created/updated alert {alert.alert_id} for event {event['event_id']}")
+                    logger.debug("Created/updated alert %s for event %s", alert.alert_id, event['event_id'])
                     
                     # Mark raw item as normalized
                     mark_raw_item_status(session, raw_item.raw_id, "NORMALIZED")
@@ -337,13 +337,13 @@ def main(
                     
                 except Exception as e:
                     error_msg = str(e)
-                    logger.error(f"Failed to process raw_item {raw_item.raw_id}: {error_msg}", exc_info=True)
+                    logger.error("Failed to process raw_item %s: %s", raw_item.raw_id, error_msg, exc_info=True)
                     try:
                         session.rollback()  # Rollback failed transaction
                         mark_raw_item_status(session, raw_item.raw_id, "FAILED", error=error_msg)
                         session.commit()
                     except Exception as rollback_error:
-                        logger.error(f"Failed to rollback and mark status: {rollback_error}")
+                        logger.error("Failed to rollback and mark status: %s", rollback_error)
                         session.rollback()
                         fatal_failure = True
                         raise
@@ -370,7 +370,7 @@ def main(
             error_msg = str(batch_error)
             # Truncate error to 1000 chars for database safety
             source_error_msg = error_msg[:1000] if len(error_msg) > 1000 else error_msg
-            logger.error(f"Source batch {source_id} failed: {error_msg}", exc_info=True)
+            logger.error("Source batch %s failed: %s", source_id, error_msg, exc_info=True)
             
             # Calculate duration immediately (before potentially re-raising)
             source_duration = time.monotonic() - source_start_time

@@ -38,7 +38,7 @@ def test_init_creates_config_files(config_dir, example_files, monkeypatch):
             return config_dir
         return original_path(path_str)
     
-    monkeypatch.setattr("hardstop.cli.Path", mock_path)
+    monkeypatch.setattr("hardstop.cli.setup.Path", mock_path)
     
     # Create args namespace
     class Args:
@@ -78,7 +78,7 @@ def test_init_skips_existing_files(config_dir, example_files, monkeypatch):
             return config_dir
         return original_path(path_str)
     
-    monkeypatch.setattr("hardstop.cli.Path", mock_path)
+    monkeypatch.setattr("hardstop.cli.setup.Path", mock_path)
     
     # Create args namespace
     class Args:
@@ -111,7 +111,7 @@ def test_init_force_overwrites_existing_files(config_dir, example_files, monkeyp
             return config_dir
         return original_path(path_str)
     
-    monkeypatch.setattr("hardstop.cli.Path", mock_path)
+    monkeypatch.setattr("hardstop.cli.setup.Path", mock_path)
     
     # Create args namespace
     class Args:
@@ -140,7 +140,7 @@ def test_init_validates_yaml(config_dir, example_files, monkeypatch):
             return config_dir
         return original_path(path_str)
     
-    monkeypatch.setattr("hardstop.cli.Path", mock_path)
+    monkeypatch.setattr("hardstop.cli.setup.Path", mock_path)
     
     # Create args namespace
     class Args:

@@ -17,7 +17,7 @@ def load_facilities_from_csv(csv_path: Path, session: Session) -> int:
     Expected CSV columns: facility_id, name, type, city, state, country, lat, lon, criticality_score
     """
     if not csv_path.exists():
-        logger.warning(f"CSV file not found: {csv_path}")
+        logger.warning("CSV file not found: %s", csv_path)
         return 0
     
     count = 0
@@ -40,7 +40,7 @@ def load_facilities_from_csv(csv_path: Path, session: Session) -> int:
             count += 1
     
     session.commit()
-    logger.info(f"Loaded {count} facilities from {csv_path}")
+    logger.info("Loaded %s facilities from %s", count, csv_path)
     return count
 
 
@@ -51,7 +51,7 @@ def load_lanes_from_csv(csv_path: Path, session: Session) -> int:
     Expected CSV columns: lane_id, origin_facility_id, dest_facility_id, mode, carrier_name, avg_transit_days, volume_score
     """
     if not csv_path.exists():
-        logger.warning(f"CSV file not found: {csv_path}")
+        logger.warning("CSV file not found: %s", csv_path)
         return 0
     
     count = 0
@@ -71,7 +71,7 @@ def load_lanes_from_csv(csv_path: Path, session: Session) -> int:
             count += 1
     
     session.commit()
-    logger.info(f"Loaded {count} lanes from {csv_path}")
+    logger.info("Loaded %s lanes from %s", count, csv_path)
     return count
 
 
@@ -82,7 +82,7 @@ def load_shipments_from_csv(csv_path: Path, session: Session) -> int:
     Expected CSV columns: shipment_id, order_id, lane_id, sku_id, qty, status, ship_date, eta_date, customer_name, priority_flag
     """
     if not csv_path.exists():
-        logger.warning(f"CSV file not found: {csv_path}")
+        logger.warning("CSV file not found: %s", csv_path)
         return 0
     
     count = 0
@@ -105,7 +105,7 @@ def load_shipments_from_csv(csv_path: Path, session: Session) -> int:
             count += 1
     
     session.commit()
-    logger.info(f"Loaded {count} shipments from {csv_path}")
+    logger.info("Loaded %s shipments from %s", count, csv_path)
     return count
 
 

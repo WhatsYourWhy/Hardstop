@@ -67,7 +67,7 @@ def link_to_network(
     # If facilities are already specified, use those
     if event.get("facilities"):
         matched_facility_ids = event["facilities"]
-        logger.info(f"Using pre-specified facilities: {matched_facility_ids}")
+        logger.info("Using pre-specified facilities: %s", matched_facility_ids)
     else:
         # Extract city/state from event or try to parse from raw_text
         city = event.get("city", "").strip() if event.get("city") else None
@@ -83,7 +83,7 @@ def link_to_network(
             if match:
                 city = match.group(1)
                 state = match.group(2)
-                logger.info(f"Extracted location from text: {city}, {state}")
+                logger.info("Extracted location from text: %s, %s", city, state)
         
         if city or state:
             # Build query conditions
@@ -99,7 +99,7 @@ def link_to_network(
                 query = session.query(Facility).filter(or_(*conditions))
                 facilities = query.all()
                 matched_facility_ids = [f.facility_id for f in facilities]
-                logger.info(f"Matched {len(matched_facility_ids)} facilities by location: {city}, {state}, {country}")
+                logger.info("Matched %s facilities by location: %s, %s, %s", len(matched_facility_ids), city, state, country)
         
         # Also try to extract facility IDs from raw text (simple heuristic)
         if not matched_facility_ids and event.get("raw_text"):
@@ -114,13 +114,13 @@ def link_to_network(
                 ).all()
                 if existing:
                     matched_facility_ids = [f.facility_id for f in existing]
-                    logger.info(f"Matched facilities from text: {matched_facility_ids}")
+                    logger.info("Matched facilities from text: %s", matched_facility_ids)
     
     # Update event with matched facilities
     if matched_facility_ids:
         event["facilities"] = matched_facility_ids
     else:
-        logger.warning(f"Could not match event to any facilities. Event: {event.get('title', 'Unknown')}")
+        logger.warning("Could not match event to any facilities. Event: %s", event.get('title', 'Unknown'))
         event["facilities"] = []
     
     # Find upcoming shipments from matched facilities
@@ -167,9 +167,9 @@ def link_to_network(
                 if include:
                     matched_shipment_ids.append(shipment.shipment_id)
             
-            logger.info(f"Found {len(matched_shipment_ids)} upcoming shipments from matched facilities")
+            logger.info("Found %s upcoming shipments from matched facilities", len(matched_shipment_ids))
         else:
-            logger.info(f"No lanes found originating from facilities: {matched_facility_ids}")
+            logger.info("No lanes found originating from facilities: %s", matched_facility_ids)
     
     # Update event with matched shipments
     event["shipments"] = matched_shipment_ids

@@ -21,7 +21,7 @@
 
 ## [1.1.0] - 2025-02-15
 
-### Added (shipped)
+### Added
 - Structured source health scoring
   - Health score (0-100) plus failure-budget states (`HEALTHY`, `WATCH`, `BLOCKED`)
   - `hardstop sources health` surfaces scores, failure streaks, suppression ratios, and `suppression_pct`
@@ -43,13 +43,7 @@
 - Doctor command now reports failure-budget warnings/blockers alongside stale counts
 - `hardstop fetch` default `--max-items-per-source` is now 10 (was 50) to stay aligned with README
 
-### Planned follow-ups
-- Canonical source registry with tier defaults (`hardstop.config.loader`, `config/sources*.yaml`)
-- Adapter diagnostics + fetch telemetry contract for all adapters
-- Scoring math pinned to persisted telemetry once adapters emit the enriched envelopes
-# Changelog
-
-## [1.0.0] - Unreleased
+## [1.0.0] - 2025-01-15
 
 **V1 Frozen (Supply Chain)** — Hardstop (Supply Chain) v1.0 is frozen as a deterministic, consulting-ready supply chain risk decision engine. Core decision semantics are stable. Behavior-changing changes require a v1.x or v2 proposal.
 

@@ -59,25 +59,23 @@ class RawItem(Base):
 
     raw_id = Column(String, primary_key=True)
     source_id = Column(String, nullable=False, index=True)
-    tier = Column(String, nullable=False)  # global, regional, local
-    fetched_at_utc = Column(String, nullable=False)  # ISO 8601 string
-    published_at_utc = Column(String, nullable=True)  # ISO 8601 string
+    tier = Column(String, nullable=False)
+    fetched_at_utc = Column(String, nullable=False)
+    published_at_utc = Column(String, nullable=True)
     canonical_id = Column(String, nullable=True, index=True)
     url = Column(String, nullable=True)
     title = Column(String, nullable=True)
-    raw_payload_json = Column(Text, nullable=False)  # Full original item as JSON
-    content_hash = Column(String, nullable=True, index=True)  # SHA256 hash
-    status = Column(String, nullable=False, default="NEW")  # NEW, NORMALIZED, FAILED
+    raw_payload_json = Column(Text, nullable=False)
+    content_hash = Column(String, nullable=True, index=True)
+    status = Column(String, nullable=False, default="NEW")
     error = Column(Text, nullable=True)
-    trust_tier = Column(Integer, nullable=True)  # v0.7: 1|2|3 (default 2)
-    
-    # v0.8: Suppression metadata
-    suppression_status = Column(String, nullable=True)  # SUPPRESSED or null
+    trust_tier = Column(Integer, nullable=True)
+    suppression_status = Column(String, nullable=True)
     suppression_primary_rule_id = Column(String, nullable=True)
-    suppression_rule_ids_json = Column(Text, nullable=True)  # JSON array of matched rule IDs
-    suppressed_at_utc = Column(String, nullable=True)  # ISO 8601 string
-    suppression_stage = Column(String, nullable=True)  # e.g., INGEST_EXTERNAL
-    suppression_reason_code = Column(String, nullable=True)  # v1.1: stable reason code for analytics
+    suppression_rule_ids_json = Column(Text, nullable=True)
+    suppressed_at_utc = Column(String, nullable=True)
+    suppression_stage = Column(String, nullable=True)
+    suppression_reason_code = Column(String, nullable=True)
 
 
 class Event(Base):
@@ -86,26 +84,24 @@ class Event(Base):
     event_id = Column(String, primary_key=True)
     source_type = Column(String, nullable=False)
     source_name = Column(String)
-    source_id = Column(String, nullable=True, index=True)  # v0.6: external source ID
-    raw_id = Column(String, nullable=True, index=True)  # v0.6: link to raw_items
+    source_id = Column(String, nullable=True, index=True)
+    raw_id = Column(String, nullable=True, index=True)
     title = Column(String)
     raw_text = Column(Text)
     event_type = Column(String)
-    event_time_utc = Column(String, nullable=True)  # v0.6: ISO 8601 string
+    event_time_utc = Column(String, nullable=True)
     severity_guess = Column(Integer)
     city = Column(String)
     state = Column(String)
     country = Column(String)
-    location_hint = Column(Text, nullable=True)  # v0.6: best-effort location text
-    entities_json = Column(Text, nullable=True)  # v0.6: extracted entities as JSON
-    event_payload_json = Column(Text, nullable=True)  # v0.6: normalized event as JSON
-    trust_tier = Column(Integer, nullable=True)  # v0.7: 1|2|3 (default 2)
-    
-    # v0.8: Suppression metadata
+    location_hint = Column(Text, nullable=True)
+    entities_json = Column(Text, nullable=True)
+    event_payload_json = Column(Text, nullable=True)
+    trust_tier = Column(Integer, nullable=True)
     suppression_primary_rule_id = Column(String, nullable=True)
-    suppression_rule_ids_json = Column(Text, nullable=True)  # JSON array of matched rule IDs
-    suppressed_at_utc = Column(String, nullable=True)  # ISO 8601 string
-    suppression_reason_code = Column(String, nullable=True)  # v1.1: reason code for observability
+    suppression_rule_ids_json = Column(Text, nullable=True)
+    suppressed_at_utc = Column(String, nullable=True)
+    suppression_reason_code = Column(String, nullable=True)
 
 
 class Alert(Base):
@@ -114,56 +110,47 @@ class Alert(Base):
     alert_id = Column(String, primary_key=True)
     summary = Column(Text, nullable=False)
     risk_type = Column(String, nullable=False)
-    classification = Column(Integer, nullable=False)  # Canonical field (0=Interesting, 1=Relevant, 2=Impactful)
-    priority = Column(Integer, nullable=True)  # DEPRECATED: Use classification. Will be removed in v0.4.
+    classification = Column(Integer, nullable=False)
+    priority = Column(Integer, nullable=True)  # Deprecated: use classification
     status = Column(String, nullable=False)
     root_event_id = Column(String, nullable=False)
     reasoning = Column(Text)
     recommended_actions = Column(Text)
     
-    # Correlation fields (v0.4)
     correlation_key = Column(String, nullable=True, index=True)
-    correlation_action = Column(String, nullable=True)  # "CREATED" or "UPDATED" - fact about ingest time
-    first_seen_utc = Column(String, nullable=True)  # ISO 8601 string for consistent storage
-    last_seen_utc = Column(String, nullable=True)  # ISO 8601 string for consistent storage
+    correlation_action = Column(String, nullable=True)
+    first_seen_utc = Column(String, nullable=True)
+    last_seen_utc = Column(String, nullable=True)
     update_count = Column(Integer, nullable=True)
-    root_event_ids_json = Column(Text, nullable=True)  # Store list as JSON string
-    
-    # Brief fields (v0.5)
-    impact_score = Column(Integer, nullable=True)  # Network impact score (0-10)
-    scope_json = Column(Text, nullable=True)  # Scope as JSON: {"facilities": [...], "lanes": [...], "shipments": [...]}
-    
-    # v0.7: Tier-aware briefing and trust weighting
-    tier = Column(String, nullable=True)  # global, regional, local - for brief efficiency
-    source_id = Column(String, nullable=True, index=True)  # Last-updating source ID - for UI efficiency
-    trust_tier = Column(Integer, nullable=True)  # 1|2|3 (default 2) - source trust tier
-    diagnostics_json = Column(Text, nullable=True)  # v1.1: serialized AlertDiagnostics
+    root_event_ids_json = Column(Text, nullable=True)
+    impact_score = Column(Integer, nullable=True)
+    scope_json = Column(Text, nullable=True)
+    tier = Column(String, nullable=True)
+    source_id = Column(String, nullable=True, index=True)
+    trust_tier = Column(Integer, nullable=True)
+    diagnostics_json = Column(Text, nullable=True)
 
 
 class SourceRun(Base):
-    """Source health tracking (v0.9)."""
     __tablename__ = "source_runs"
-    
-    run_id = Column(String, primary_key=True)  # UUID
-    run_group_id = Column(String, nullable=False, index=True)  # UUID linking related runs
+
+    run_id = Column(String, primary_key=True)
+    run_group_id = Column(String, nullable=False, index=True)
     source_id = Column(String, nullable=False, index=True)
-    phase = Column(String, nullable=False, index=True)  # FETCH | INGEST
-    run_at_utc = Column(String, nullable=False, index=True)  # ISO 8601
-    status = Column(String, nullable=False)  # SUCCESS | FAILURE
-    status_code = Column(Integer, nullable=True)  # HTTP status code
-    error = Column(Text, nullable=True)  # Error message if failed
+    phase = Column(String, nullable=False, index=True)
+    run_at_utc = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False)
+    status_code = Column(Integer, nullable=True)
+    error = Column(Text, nullable=True)
     duration_seconds = Column(Float, nullable=True)
     
-    # FETCH phase metrics
     items_fetched = Column(Integer, nullable=False, default=0)
-    items_new = Column(Integer, nullable=False, default=0)  # Actually stored (post-dedup)
-    
-    # INGEST phase metrics
+    items_new = Column(Integer, nullable=False, default=0)
     items_processed = Column(Integer, nullable=False, default=0)
     items_suppressed = Column(Integer, nullable=False, default=0)
     items_events_created = Column(Integer, nullable=False, default=0)
-    items_alerts_touched = Column(Integer, nullable=False, default=0)  # created + updated
-    diagnostics_json = Column(Text, nullable=True)  # v1.1: structured diagnostics envelope
+    items_alerts_touched = Column(Integer, nullable=False, default=0)
+    diagnostics_json = Column(Text, nullable=True)
     
     __table_args__ = (
         Index('idx_source_runs_source_run_at', 'source_id', 'run_at_utc'),

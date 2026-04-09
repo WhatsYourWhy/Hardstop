@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import jsonschema
 import pytest
 
-from hardstop import cli
+from hardstop.cli import pipeline as pipeline_mod
+from hardstop.cli import output as output_mod
 from hardstop.ops import run_record
 from hardstop.retrieval.fetcher import FetchResult
 
@@ -20,7 +21,8 @@ def _instrument_run_record(tmp_path, monkeypatch):
         kwargs["dest_dir"] = records_dir
         return run_record.emit_run_record(**kwargs)
 
-    monkeypatch.setattr(cli, "emit_run_record", _emit)
+    monkeypatch.setattr(pipeline_mod, "emit_run_record", _emit)
+    monkeypatch.setattr(output_mod, "emit_run_record", _emit)
     return records_dir
 
 
@@ -40,35 +42,37 @@ def _fake_session_context(_path):
 
 
 def _stub_config(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "load_config", lambda: {"storage": {"sqlite_path": str(tmp_path / "hardstop.db")}})
-    monkeypatch.setattr(cli, "resolve_config_snapshot", lambda: {"runtime": {"mode": "test"}})
+    monkeypatch.setattr(pipeline_mod, "load_config", lambda: {"storage": {"sqlite_path": str(tmp_path / "hardstop.db")}})
+    monkeypatch.setattr(pipeline_mod, "resolve_config_snapshot", lambda: {"runtime": {"mode": "test"}})
+    monkeypatch.setattr(output_mod, "load_config", lambda: {"storage": {"sqlite_path": str(tmp_path / "hardstop.db")}})
+    monkeypatch.setattr(output_mod, "resolve_config_snapshot", lambda: {"runtime": {"mode": "test"}})
 
 
 def _stub_noops(monkeypatch):
-    monkeypatch.setattr(cli, "ensure_raw_items_table", lambda *_, **__: None)
-    monkeypatch.setattr(cli, "ensure_event_external_fields", lambda *_, **__: None)
-    monkeypatch.setattr(cli, "ensure_alert_correlation_columns", lambda *_, **__: None)
-    monkeypatch.setattr(cli, "ensure_trust_tier_columns", lambda *_, **__: None)
-    monkeypatch.setattr(cli, "ensure_source_runs_table", lambda *_, **__: None)
-    monkeypatch.setattr(cli, "ensure_suppression_columns", lambda *_, **__: None)
+    for mod in (pipeline_mod, output_mod):
+        for name in ("ensure_raw_items_table", "ensure_event_external_fields",
+                      "ensure_alert_correlation_columns", "ensure_trust_tier_columns",
+                      "ensure_source_runs_table", "ensure_suppression_columns"):
+            if hasattr(mod, name):
+                monkeypatch.setattr(mod, name, lambda *_, **__: None)
 
 
 def test_cmd_fetch_emits_run_record_success(monkeypatch, tmp_path):
     records_dir = _instrument_run_record(tmp_path, monkeypatch)
     _stub_config(monkeypatch, tmp_path)
     _stub_noops(monkeypatch)
-    monkeypatch.setattr(cli, "session_context", _fake_session_context)
-    monkeypatch.setattr(cli, "get_all_sources", lambda _cfg: [{"id": "source-1", "tier": "global", "enabled": True}])
-    monkeypatch.setattr(cli, "load_sources_config", lambda: {"sources": []})
-    monkeypatch.setattr(cli, "get_source_with_defaults", lambda src, _cfg: src)
+    monkeypatch.setattr(pipeline_mod, "session_context", _fake_session_context)
+    monkeypatch.setattr(pipeline_mod, "get_all_sources", lambda _cfg: [{"id": "source-1", "tier": "global", "enabled": True}])
+    monkeypatch.setattr(pipeline_mod, "load_sources_config", lambda: {"sources": []})
+    monkeypatch.setattr(pipeline_mod, "_resolve_source_defaults", lambda src, _cfg: src)
 
     def _save_raw_item(session, **_kwargs):
         item = SimpleNamespace(status="NEW")
         session.new.add(item)
         return item
 
-    monkeypatch.setattr(cli, "save_raw_item", _save_raw_item)
-    monkeypatch.setattr(cli, "create_source_run", lambda *_, **__: None)
+    monkeypatch.setattr(pipeline_mod, "save_raw_item", _save_raw_item)
+    monkeypatch.setattr(pipeline_mod, "create_source_run", lambda *_, **__: None)
     class _StubFetcher:
         def __init__(self, **_kwargs):
             self._meta = {"seed": 7, "inputs_version": "stub@1", "notes": "jitter_seconds=0"}
@@ -89,7 +93,7 @@ def test_cmd_fetch_emits_run_record_success(monkeypatch, tmp_path):
         def best_effort_metadata(self):
             return self._meta
 
-    monkeypatch.setattr(cli, "SourceFetcher", _StubFetcher)
+    monkeypatch.setattr(pipeline_mod, "SourceFetcher", _StubFetcher)
 
     args = argparse.Namespace(
         tier=None,
@@ -100,7 +104,7 @@ def test_cmd_fetch_emits_run_record_success(monkeypatch, tmp_path):
         fail_fast=False,
         strict=False,
     )
-    cli.cmd_fetch(args, run_group_id="group-fetch")
+    pipeline_mod.cmd_fetch(args, run_group_id="group-fetch")
 
     data = _load_validated_record(records_dir)
     assert data["operator_id"] == "hardstop.fetch@1.0.0"
@@ -114,7 +118,7 @@ def test_cmd_fetch_emits_run_record_on_failure(monkeypatch, tmp_path):
     records_dir = _instrument_run_record(tmp_path, monkeypatch)
     _stub_config(monkeypatch, tmp_path)
     _stub_noops(monkeypatch)
-    monkeypatch.setattr(cli, "session_context", _fake_session_context)
+    monkeypatch.setattr(pipeline_mod, "session_context", _fake_session_context)
 
     class _FailingFetcher:
         def __init__(self, **_kwargs):
@@ -126,9 +130,9 @@ def test_cmd_fetch_emits_run_record_on_failure(monkeypatch, tmp_path):
         def best_effort_metadata(self):
             return self._meta
 
-    monkeypatch.setattr(cli, "SourceFetcher", _FailingFetcher)
-    monkeypatch.setattr(cli, "load_sources_config", lambda: {"sources": []})
-    monkeypatch.setattr(cli, "get_all_sources", lambda _cfg: [])
+    monkeypatch.setattr(pipeline_mod, "SourceFetcher", _FailingFetcher)
+    monkeypatch.setattr(pipeline_mod, "load_sources_config", lambda: {"sources": []})
+    monkeypatch.setattr(pipeline_mod, "get_all_sources", lambda _cfg: [])
 
     args = argparse.Namespace(
         tier=None,
@@ -140,7 +144,7 @@ def test_cmd_fetch_emits_run_record_on_failure(monkeypatch, tmp_path):
         strict=True,
     )
     with pytest.raises(RuntimeError):
-        cli.cmd_fetch(args, run_group_id="group-fetch-fail")
+        pipeline_mod.cmd_fetch(args, run_group_id="group-fetch-fail")
 
     data = _load_validated_record(records_dir)
     assert data["operator_id"] == "hardstop.fetch@1.0.0"
@@ -151,8 +155,8 @@ def test_cmd_ingest_emits_run_record_success(monkeypatch, tmp_path):
     records_dir = _instrument_run_record(tmp_path, monkeypatch)
     _stub_config(monkeypatch, tmp_path)
     _stub_noops(monkeypatch)
-    monkeypatch.setattr(cli, "session_context", _fake_session_context)
-    monkeypatch.setattr(cli, "ingest_external_main", lambda **__: {
+    monkeypatch.setattr(pipeline_mod, "session_context", _fake_session_context)
+    monkeypatch.setattr(pipeline_mod, "ingest_external_main", lambda **__: {
         "processed": 2,
         "events": 1,
         "alerts": 1,
@@ -170,7 +174,7 @@ def test_cmd_ingest_emits_run_record_success(monkeypatch, tmp_path):
         fail_fast=False,
         strict=True,
     )
-    cli.cmd_ingest_external(args, run_group_id="group-ingest")
+    pipeline_mod.cmd_ingest_external(args, run_group_id="group-ingest")
 
     data = _load_validated_record(records_dir)
     assert data["operator_id"] == "hardstop.ingest@1.0.0"
@@ -182,12 +186,12 @@ def test_cmd_ingest_emits_run_record_on_failure(monkeypatch, tmp_path):
     records_dir = _instrument_run_record(tmp_path, monkeypatch)
     _stub_config(monkeypatch, tmp_path)
     _stub_noops(monkeypatch)
-    monkeypatch.setattr(cli, "session_context", _fake_session_context)
+    monkeypatch.setattr(pipeline_mod, "session_context", _fake_session_context)
 
     def _fail_ingest(**_kwargs):
         raise RuntimeError("ingest boom")
 
-    monkeypatch.setattr(cli, "ingest_external_main", _fail_ingest)
+    monkeypatch.setattr(pipeline_mod, "ingest_external_main", _fail_ingest)
 
     args = argparse.Namespace(
         limit=5,
@@ -200,7 +204,7 @@ def test_cmd_ingest_emits_run_record_on_failure(monkeypatch, tmp_path):
         strict=False,
     )
     with pytest.raises(RuntimeError):
-        cli.cmd_ingest_external(args, run_group_id="group-ingest-fail")
+        pipeline_mod.cmd_ingest_external(args, run_group_id="group-ingest-fail")
 
     data = _load_validated_record(records_dir)
     assert data["operator_id"] == "hardstop.ingest@1.0.0"
@@ -211,9 +215,9 @@ def test_cmd_brief_emits_run_record_success(monkeypatch, tmp_path):
     records_dir = _instrument_run_record(tmp_path, monkeypatch)
     _stub_config(monkeypatch, tmp_path)
     _stub_noops(monkeypatch)
-    monkeypatch.setattr(cli, "session_context", _fake_session_context)
-    monkeypatch.setattr(cli, "generate_brief", lambda *_, **__: {"alerts": []})
-    monkeypatch.setattr(cli, "render_markdown", lambda *_: "brief-md")
+    monkeypatch.setattr(output_mod, "session_context", _fake_session_context)
+    monkeypatch.setattr(output_mod, "generate_brief", lambda *_, **__: {"alerts": []})
+    monkeypatch.setattr(output_mod, "render_markdown", lambda *_: "brief-md")
 
     args = argparse.Namespace(
         today=True,
@@ -223,7 +227,7 @@ def test_cmd_brief_emits_run_record_success(monkeypatch, tmp_path):
         include_class0=False,
         strict=False,
     )
-    cli.cmd_brief(args, run_group_id="group-brief")
+    output_mod.cmd_brief(args, run_group_id="group-brief")
 
     data = _load_validated_record(records_dir)
     assert data["operator_id"] == "hardstop.brief@1.0.0"
@@ -237,13 +241,13 @@ def test_cmd_brief_emits_run_record_on_failure(monkeypatch, tmp_path):
     records_dir = _instrument_run_record(tmp_path, monkeypatch)
     _stub_config(monkeypatch, tmp_path)
     _stub_noops(monkeypatch)
-    monkeypatch.setattr(cli, "session_context", _fake_session_context)
+    monkeypatch.setattr(output_mod, "session_context", _fake_session_context)
 
     def _fail_brief(*_args, **_kwargs):
         raise RuntimeError("brief boom")
 
-    monkeypatch.setattr(cli, "generate_brief", _fail_brief)
-    monkeypatch.setattr(cli, "render_markdown", lambda *_: "brief-md")
+    monkeypatch.setattr(output_mod, "generate_brief", _fail_brief)
+    monkeypatch.setattr(output_mod, "render_markdown", lambda *_: "brief-md")
 
     args = argparse.Namespace(
         today=True,
@@ -254,7 +258,7 @@ def test_cmd_brief_emits_run_record_on_failure(monkeypatch, tmp_path):
         strict=True,
     )
     with pytest.raises(RuntimeError):
-        cli.cmd_brief(args, run_group_id="group-brief-fail")
+        output_mod.cmd_brief(args, run_group_id="group-brief-fail")
 
     data = _load_validated_record(records_dir)
     assert data["operator_id"] == "hardstop.brief@1.0.0"
@@ -264,17 +268,18 @@ def test_cmd_brief_emits_run_record_on_failure(monkeypatch, tmp_path):
 def test_cmd_run_respects_readme_fetch_defaults(monkeypatch, tmp_path):
     _stub_config(monkeypatch, tmp_path)
     _stub_noops(monkeypatch)
-    monkeypatch.setattr(cli, "session_context", _fake_session_context)
-    monkeypatch.setattr(cli, "list_recent_runs", lambda *_, **__: [])
-    monkeypatch.setattr(cli, "get_all_source_health", lambda *_, **__: [])
-    monkeypatch.setattr(cli, "load_sources_config", lambda: {"version": 1, "tiers": {}, "defaults": {}})
-    monkeypatch.setattr(cli, "get_all_sources", lambda _cfg: [{"id": "source-1", "enabled": True}])
-    monkeypatch.setattr(cli, "load_suppression_config", lambda: {"version": 1, "enabled": True, "rules": []})
-    monkeypatch.setattr(cli, "emit_run_record", lambda **__: None)
-    monkeypatch.setattr(cli, "evaluate_run_status", lambda **__: (0, ["All systems healthy"]))
+    monkeypatch.setattr(pipeline_mod, "session_context", _fake_session_context)
+    monkeypatch.setattr(pipeline_mod, "list_recent_runs", lambda *_, **__: [])
+    monkeypatch.setattr(pipeline_mod, "get_all_source_health", lambda *_, **__: [])
+    monkeypatch.setattr(pipeline_mod, "load_sources_config", lambda: {"version": 1, "tiers": {}, "defaults": {}})
+    monkeypatch.setattr(pipeline_mod, "get_all_sources", lambda _cfg: [{"id": "source-1", "enabled": True}])
+    monkeypatch.setattr(pipeline_mod, "load_suppression_config", lambda: {"version": 1, "enabled": True, "rules": []})
+    monkeypatch.setattr(pipeline_mod, "emit_run_record", lambda **__: None)
+    monkeypatch.setattr(pipeline_mod, "evaluate_run_status", lambda **__: (0, ["All systems healthy"]))
 
+    import sys
     exit_codes: list[int] = []
-    monkeypatch.setattr(cli.sys, "exit", lambda code: exit_codes.append(code))
+    monkeypatch.setattr(sys, "exit", lambda code: exit_codes.append(code))
 
     captures = {}
 
@@ -290,9 +295,9 @@ def test_cmd_run_respects_readme_fetch_defaults(monkeypatch, tmp_path):
         captures["brief_args"] = args
         assert run_group_id == captures["run_group_id"]
 
-    monkeypatch.setattr(cli, "cmd_fetch", _capture_fetch)
-    monkeypatch.setattr(cli, "cmd_ingest_external", _capture_ingest)
-    monkeypatch.setattr(cli, "cmd_brief", _capture_brief)
+    monkeypatch.setattr(pipeline_mod, "cmd_fetch", _capture_fetch)
+    monkeypatch.setattr(pipeline_mod, "cmd_ingest_external", _capture_ingest)
+    monkeypatch.setattr("hardstop.cli.output.cmd_brief", _capture_brief)
 
     args = argparse.Namespace(
         since="24h",
@@ -303,7 +308,7 @@ def test_cmd_run_respects_readme_fetch_defaults(monkeypatch, tmp_path):
         allow_ingest_errors=False,
     )
 
-    cli.cmd_run(args)
+    pipeline_mod.cmd_run(args)
 
     assert captures["fetch_args"].max_items_per_source == 10
     assert exit_codes == [0]
