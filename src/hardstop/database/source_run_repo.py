@@ -80,7 +80,7 @@ def create_source_run(
     )
     
     session.add(source_run)
-    logger.debug(f"Created SourceRun {run_id} for {source_id} ({phase}, {status})")
+    logger.debug("Created SourceRun %s for %s (%s, %s)", run_id, source_id, phase, status)
     
     return source_run
 

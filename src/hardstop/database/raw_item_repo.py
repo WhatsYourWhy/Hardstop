@@ -59,7 +59,7 @@ def save_raw_item(
     if existing:
         # Update fetched_at_utc but keep status
         existing.fetched_at_utc = fetched_at_utc
-        logger.debug(f"Raw item already exists (dedupe): {source_id}/{canonical_id or content_hash[:8]}")
+        logger.debug("Raw item already exists (dedupe): %s/%s", source_id, canonical_id or content_hash[:8])
         return existing
     
     # Create new raw item
@@ -86,7 +86,7 @@ def save_raw_item(
     )
     
     session.add(raw_item)
-    logger.debug(f"Created new raw item: {raw_id} from {source_id}")
+    logger.debug("Created new raw item: %s from %s", raw_id, source_id)
     return raw_item
 
 
@@ -176,7 +176,7 @@ def mark_raw_item_status(
     """
     raw_item = session.query(RawItem).filter(RawItem.raw_id == raw_id).first()
     if not raw_item:
-        logger.warning(f"Raw item not found: {raw_id}")
+        logger.warning("Raw item not found: %s", raw_id)
         return
     
     raw_item.status = status
@@ -184,7 +184,7 @@ def mark_raw_item_status(
         raw_item.error = error
     
     session.commit()
-    logger.debug(f"Updated raw item {raw_id} status to {status}")
+    logger.debug("Updated raw item %s status to %s", raw_id, status)
 
 
 def get_raw_item_by_id(session: Session, raw_id: str) -> Optional[RawItem]:
@@ -214,7 +214,7 @@ def mark_raw_item_suppressed(
     """
     raw_item = session.query(RawItem).filter(RawItem.raw_id == raw_id).first()
     if not raw_item:
-        logger.warning(f"Raw item not found: {raw_id}")
+        logger.warning("Raw item not found: %s", raw_id)
         return
     
     raw_item.suppression_status = "SUPPRESSED"
@@ -225,7 +225,7 @@ def mark_raw_item_suppressed(
     raw_item.suppression_reason_code = reason_code
     
     session.add(raw_item)
-    logger.debug(f"Marked raw item {raw_id} as suppressed (rule: {primary_rule_id})")
+    logger.debug("Marked raw item %s as suppressed (rule: %s)", raw_id, primary_rule_id)
 
 
 def query_suppressed_items(

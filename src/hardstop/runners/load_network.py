@@ -31,7 +31,7 @@ def main() -> None:
         counts = ingest_all_csvs(facilities_csv, lanes_csv, shipments_csv, session)
         
         print(f"Loaded {counts['facilities']} facilities, {counts['lanes']} lanes, {counts['shipments']} shipments")
-        logger.info(f"Network data loaded successfully: {counts}")
+        logger.info("Network data loaded successfully: %s", counts)
     finally:
         session.close()
 

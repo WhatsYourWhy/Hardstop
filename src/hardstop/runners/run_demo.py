@@ -108,22 +108,22 @@ def main(
     if alert.evidence and alert.evidence.linking_notes:
         logger.info("Linking and correlation notes:")
         for n in alert.evidence.linking_notes:
-            logger.info(f"- {n}")
+            logger.info("- %s", n)
 
     notes = event.get("linking_notes", [])
     if notes:
         logger.info("Event linking notes:")
         for n in notes:
-            logger.info(f"- {n}")
+            logger.info("- %s", n)
 
     confidence = event.get("link_confidence", {})
     provenance = event.get("link_provenance", {})
     if confidence or provenance:
         logger.info("Link confidence and provenance:")
         if confidence:
-            logger.info(f"  Confidence: {confidence}")
+            logger.info("  Confidence: %s", confidence)
         if provenance:
-            logger.info(f"  Provenance: {provenance}")
+            logger.info("  Provenance: %s", provenance)
 
     if event.get("shipments_truncated"):
         logger.info(

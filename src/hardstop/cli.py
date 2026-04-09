@@ -338,10 +338,10 @@ def cmd_sources_list(args: argparse.Namespace) -> None:
             print(f"{source_id:<30} {tier:<12} {enabled:<10} {source_type:<15} {tags:<30}")
     
     except FileNotFoundError as e:
-        logger.error(f"Sources config not found: {e}")
+        logger.error("Sources config not found: %s", e)
         print("Error: Sources config file not found. Create config/sources.yaml")
     except Exception as e:
-        logger.error(f"Error listing sources: {e}", exc_info=True)
+        logger.error("Error listing sources: %s", e, exc_info=True)
         raise
 
 
@@ -409,7 +409,7 @@ def cmd_sources_test(args: argparse.Namespace) -> None:
                     if raw_item in session.new or raw_item.status == "NEW":
                         items_new += 1
                 except Exception as e:
-                    logger.error(f"Failed to save raw item: {e}")
+                    logger.error("Failed to save raw item: %s", e)
             
             # Create FETCH SourceRun record
             diagnostics_payload = {
@@ -461,7 +461,7 @@ def cmd_sources_test(args: argparse.Namespace) -> None:
         print(f"Error: {e}")
         raise
     except Exception as e:
-        logger.error(f"Error testing source: {e}", exc_info=True)
+        logger.error("Error testing source: %s", e, exc_info=True)
         raise
 
 
@@ -716,10 +716,10 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                                 items_new += 1
                                 total_stored += 1
                         except Exception as e:
-                            logger.error(f"Failed to save raw item from {source_id}: {e}")
+                            logger.error("Failed to save raw item from %s: %s", source_id, e)
                     
                     total_fetched += len(candidates)
-                    logger.info(f"Fetched {len(candidates)} items from {source_id}, {items_new} new")
+                    logger.info("Fetched %s items from %s, %s new", len(candidates), source_id, items_new)
                     
                     # Create FETCH phase SourceRun record
                     diagnostics_payload = {
@@ -778,7 +778,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
             best_effort_metadata = fetcher.best_effort_metadata()
         
     except Exception as e:
-        logger.error(f"Error fetching: {e}", exc_info=True)
+        logger.error("Error fetching: %s", e, exc_info=True)
         errors.append(Diagnostic(code="FETCH_ERROR", message=str(e)))
         raise
     finally:
@@ -843,7 +843,7 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
         try:
             since_hours = _parse_since(args.since)
         except ValueError:
-            logger.warning(f"Invalid --since value: {args.since}, ignoring")
+            logger.warning("Invalid --since value: %s, ignoring", args.since)
     
     try:
         with session_context(sqlite_path) as session:
@@ -888,7 +888,7 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
         ]
     
     except Exception as e:
-        logger.error(f"Error ingesting: {e}", exc_info=True)
+        logger.error("Error ingesting: %s", e, exc_info=True)
         errors.append(Diagnostic(code="INGEST_ERROR", message=str(e)))
         raise
     finally:
@@ -934,7 +934,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     try:
         cmd_fetch(fetch_args, run_group_id=run_group_id)
     except Exception as e:
-        logger.error(f"Fetch failed: {e}", exc_info=True)
+        logger.error("Fetch failed: %s", e, exc_info=True)
         # Will be caught by run status evaluation
     
     # Step 2: Ingest external
@@ -953,7 +953,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     try:
         cmd_ingest_external(ingest_args, run_group_id=run_group_id)
     except Exception as e:
-        logger.error(f"Ingest failed: {e}", exc_info=True)
+        logger.error("Ingest failed: %s", e, exc_info=True)
         # Will be caught by run status evaluation
     
     # Step 3: Brief
@@ -969,7 +969,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     try:
         cmd_brief(brief_args, run_group_id=run_group_id)
     except Exception as e:
-        logger.error(f"Brief failed: {e}", exc_info=True)
+        logger.error("Brief failed: %s", e, exc_info=True)
     
     # Step 4: Evaluate run status (v1.0)
     print("\nStep 4: Evaluating run status...")
@@ -1046,9 +1046,9 @@ def cmd_run(args: argparse.Namespace) -> None:
                         if last_success_utc < stale_threshold_iso:
                             stale_sources.append(source_id)
             except Exception as e:
-                logger.warning(f"Error calculating stale sources: {e}")
+                logger.warning("Error calculating stale sources: %s", e)
     except Exception as e:
-        logger.error(f"Error collecting run data: {e}", exc_info=True)
+        logger.error("Error collecting run data: %s", e, exc_info=True)
     
     # Run doctor checks to get findings (v1.0)
     try:
@@ -1080,7 +1080,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         except FileNotFoundError:
             pass  # Suppression config optional
         except Exception as e:
-            logger.warning(f"Error checking suppression config: {e}")
+            logger.warning("Error checking suppression config: %s", e)
         
         # Health budget summary
         try:
@@ -1100,7 +1100,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             if watch:
                 doctor_findings["health_budget_warnings"] = watch
         except Exception as e:
-            logger.warning(f"Error evaluating health budgets: {e}")
+            logger.warning("Error evaluating health budgets: %s", e)
         
         # Check schema drift (check for required tables)
         try:
@@ -1121,9 +1121,9 @@ def cmd_run(args: argparse.Namespace) -> None:
             finally:
                 conn.close()
         except Exception as e:
-            logger.warning(f"Error checking schema: {e}")
+            logger.warning("Error checking schema: %s", e)
     except Exception as e:
-        logger.warning(f"Error running doctor checks: {e}")
+        logger.warning("Error running doctor checks: %s", e)
     
     # Evaluate run status (v1.0)
     stale_hours = _parse_since(stale_threshold) if stale_threshold else 48
@@ -1705,12 +1705,12 @@ def cmd_init(args: argparse.Namespace) -> None:
     
     # Check if example files exist
     if not sources_example.exists():
-        logger.error(f"Example file not found: {sources_example}")
+        logger.error("Example file not found: %s", sources_example)
         logger.error("Please ensure config/sources.example.yaml exists")
         return
     
     if not suppression_example.exists():
-        logger.error(f"Example file not found: {suppression_example}")
+        logger.error("Example file not found: %s", suppression_example)
         logger.error("Please ensure config/suppression.example.yaml exists")
         return
     
@@ -1723,7 +1723,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             created.append("sources.yaml")
             print(f"Created {sources_config}")
         except Exception as e:
-            logger.error(f"Failed to create sources.yaml: {e}")
+            logger.error("Failed to create sources.yaml: %s", e)
             return
     
     # Create suppression.yaml
@@ -1735,7 +1735,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             created.append("suppression.yaml")
             print(f"Created {suppression_config}")
         except Exception as e:
-            logger.error(f"Failed to create suppression.yaml: {e}")
+            logger.error("Failed to create suppression.yaml: %s", e)
             return
     
     # Summary
@@ -1798,10 +1798,10 @@ def cmd_export(args: argparse.Namespace) -> None:
                 if not args.out:
                     print(result)
             else:
-                logger.error(f"Unknown export type: {export_type}")
+                logger.error("Unknown export type: %s", export_type)
                 return
     except Exception as e:
-        logger.error(f"Error exporting: {e}", exc_info=True)
+        logger.error("Error exporting: %s", e, exc_info=True)
         raise
 
 
@@ -1864,7 +1864,7 @@ def cmd_brief(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                     limit=args.limit,
                 )
         except Exception as e:
-            logger.error(f"Error generating brief: {e}")
+            logger.error("Error generating brief: %s", e)
             print("Error: Could not generate brief. Ensure database exists and is accessible.")
             print("Run `hardstop ingest` to create the database, then `hardstop demo` to generate alerts.")
             errors.append(Diagnostic(code="BRIEF_ERROR", message=str(e)))
@@ -2320,7 +2320,7 @@ def main() -> None:
     try:
         args.func(args)
     except Exception as e:
-        logger.error(f"Error running command '{args.command}': {e}", exc_info=True)
+        logger.error("Error running command '%s': %s", args.command, e, exc_info=True)
         raise
 
 

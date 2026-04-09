@@ -40,7 +40,7 @@ def save_event(
     # Check if event already exists
     existing = session.query(Event).filter(Event.event_id == event_id).first()
     if existing:
-        logger.debug(f"Event already exists: {event_id}")
+        logger.debug("Event already exists: %s", event_id)
         return existing
     
     # Prepare suppression metadata
@@ -74,7 +74,7 @@ def save_event(
     )
     
     session.add(event_row)
-    logger.debug(f"Created new event: {event_id}")
+    logger.debug("Created new event: %s", event_id)
     return event_row
 
 
