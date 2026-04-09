@@ -22,54 +22,51 @@ from hardstop.retrieval.adapters import AdapterFetchResponse, RawItemCandidate
 
 def test_fetcher_captures_status_code_200(session):
     """Test that fetcher captures status code 200 on success."""
-    fetcher = SourceFetcher()
-    
-    # Mock a successful fetch
-    with patch('hardstop.retrieval.fetcher.create_adapter') as mock_adapter:
-        mock_adapter_instance = Mock()
-        mock_adapter_instance.fetch.return_value = AdapterFetchResponse(items=[])
-        mock_adapter.return_value = mock_adapter_instance
-        
-        # Mock source config
-        with patch('hardstop.retrieval.fetcher.get_all_sources') as mock_get_sources:
-            mock_get_sources.return_value = [{
-                "id": "test_source",
-                "type": "rss",
-                "enabled": True,
-                "tier": "global",
-                "url": "https://example.com/feed.rss",
-            }]
-            
-            results = fetcher.fetch_all()
-            assert len(results) == 1
-            assert results[0].status == "SUCCESS"
-            # Status code would be captured from actual HTTP response
-            # In this mock, we can't easily test the actual status code capture
-            # but we verify the structure is correct
+    with patch('hardstop.retrieval.fetcher.load_sources_config', return_value={"defaults": {}, "tiers": {}}):
+        fetcher = SourceFetcher()
+
+        with patch('hardstop.retrieval.fetcher.create_adapter') as mock_adapter:
+            mock_adapter_instance = Mock()
+            mock_adapter_instance.fetch.return_value = AdapterFetchResponse(items=[])
+            mock_adapter.return_value = mock_adapter_instance
+
+            with patch('hardstop.retrieval.fetcher.get_all_sources') as mock_get_sources:
+                mock_get_sources.return_value = [{
+                    "id": "test_source",
+                    "type": "rss",
+                    "enabled": True,
+                    "tier": "global",
+                    "url": "https://example.com/feed.rss",
+                }]
+
+                results = fetcher.fetch_all()
+                assert len(results) == 1
+                assert results[0].status == "SUCCESS"
 
 
 def test_fetcher_zero_items_is_success(session):
     """Test that zero items fetched = SUCCESS (quiet feeds are normal)."""
-    fetcher = SourceFetcher()
-    
-    with patch('hardstop.retrieval.fetcher.create_adapter') as mock_adapter:
-        mock_adapter_instance = Mock()
-        mock_adapter_instance.fetch.return_value = AdapterFetchResponse(items=[])  # Zero items
-        mock_adapter.return_value = mock_adapter_instance
-        
-        with patch('hardstop.retrieval.fetcher.get_all_sources') as mock_get_sources:
-            mock_get_sources.return_value = [{
-                "id": "test_source",
-                "type": "rss",
-                "enabled": True,
-                "tier": "global",
-                "url": "https://example.com/feed.rss",
-            }]
-            
-            results = fetcher.fetch_all()
-            assert len(results) == 1
-            assert results[0].status == "SUCCESS"
-            assert len(results[0].items) == 0
+    with patch('hardstop.retrieval.fetcher.load_sources_config', return_value={"defaults": {}, "tiers": {}}):
+        fetcher = SourceFetcher()
+
+        with patch('hardstop.retrieval.fetcher.create_adapter') as mock_adapter:
+            mock_adapter_instance = Mock()
+            mock_adapter_instance.fetch.return_value = AdapterFetchResponse(items=[])
+            mock_adapter.return_value = mock_adapter_instance
+
+            with patch('hardstop.retrieval.fetcher.get_all_sources') as mock_get_sources:
+                mock_get_sources.return_value = [{
+                    "id": "test_source",
+                    "type": "rss",
+                    "enabled": True,
+                    "tier": "global",
+                    "url": "https://example.com/feed.rss",
+                }]
+
+                results = fetcher.fetch_all()
+                assert len(results) == 1
+                assert results[0].status == "SUCCESS"
+                assert len(results[0].items) == 0
 
 
 def test_source_health_success_rate_computation(session):

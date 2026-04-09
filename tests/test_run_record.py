@@ -244,7 +244,8 @@ def test_cmd_incidents_replay_emits_run_record(monkeypatch, tmp_path: Path):
         dest_dir=records_dir,
     )
 
-    monkeypatch.setattr(cli, "resolve_config_snapshot", lambda: snapshot)
+    monkeypatch.setattr("hardstop.cli.setup.resolve_config_snapshot", lambda: snapshot)
+    monkeypatch.setattr("hardstop.cli.setup.fingerprint_config", fingerprint_config)
     args = argparse.Namespace(
         incident_id="ALERT-XYZ",
         correlation_key="SPILL|A|B",
