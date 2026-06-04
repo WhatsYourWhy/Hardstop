@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from ..database.schema import Alert, Event, RawItem
@@ -294,6 +294,60 @@ def update_existing_alert_row(
     return row
 
 
+def _correlation_action_filter(correlation_action: str):
+    """Match stored correlation action, preserving legacy status-based fallback semantics."""
+    if correlation_action == "UPDATED":
+        return or_(
+            Alert.correlation_action == "UPDATED",
+            and_(Alert.correlation_action.is_(None), Alert.status == "UPDATED"),
+        )
+    if correlation_action == "CREATED":
+        return or_(
+            Alert.correlation_action == "CREATED",
+            and_(Alert.correlation_action.is_(None), Alert.status != "UPDATED"),
+        )
+    return Alert.correlation_action == correlation_action
+
+
+def _apply_recent_alert_filters(
+    q,
+    *,
+    since_hours: Optional[int],
+    include_class0: bool,
+    classification: Optional[int] = None,
+    tier: Optional[str] = None,
+    source_id: Optional[str] = None,
+    correlation_action: Optional[str] = None,
+):
+    if since_hours is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+        cutoff_iso = cutoff.isoformat()
+
+        # Query: last_seen_utc >= cutoff OR first_seen_utc >= cutoff
+        q = q.filter(
+            or_(
+                Alert.last_seen_utc >= cutoff_iso,
+                Alert.first_seen_utc >= cutoff_iso,
+            )
+        )
+
+    if classification is not None:
+        q = q.filter(Alert.classification == classification)
+    elif not include_class0:
+        q = q.filter(Alert.classification > 0)
+
+    if tier is not None:
+        q = q.filter(Alert.tier == tier)
+
+    if source_id is not None:
+        q = q.filter(Alert.source_id == source_id)
+
+    if correlation_action is not None:
+        q = q.filter(_correlation_action_filter(correlation_action))
+
+    return q
+
+
 def query_recent_alerts(
     session: Session,
     since_hours: Optional[int] = 24,
@@ -303,6 +357,7 @@ def query_recent_alerts(
     classification: Optional[int] = None,
     tier: Optional[str] = None,
     source_id: Optional[str] = None,
+    correlation_action: Optional[str] = None,
 ) -> List[Alert]:
     """
     Query alerts that were created or updated within the specified time window.
@@ -316,35 +371,21 @@ def query_recent_alerts(
         classification: Optional exact classification filter
         tier: Optional exact tier filter
         source_id: Optional exact source_id filter
+        correlation_action: Optional exact correlation action filter
         
     Returns:
         List of Alert rows, sorted by classification DESC, impact_score DESC,
         update_count DESC, last_seen_utc DESC
     """
-    q = session.query(Alert)
-
-    if since_hours is not None:
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
-        cutoff_iso = cutoff.isoformat()
-
-        # Query: last_seen_utc >= cutoff OR first_seen_utc >= cutoff
-        q = q.filter(
-            or_(
-                Alert.last_seen_utc >= cutoff_iso,
-                Alert.first_seen_utc >= cutoff_iso,
-            )
-        )
-    
-    if classification is not None:
-        q = q.filter(Alert.classification == classification)
-    elif not include_class0:
-        q = q.filter(Alert.classification > 0)
-
-    if tier is not None:
-        q = q.filter(Alert.tier == tier)
-
-    if source_id is not None:
-        q = q.filter(Alert.source_id == source_id)
+    q = _apply_recent_alert_filters(
+        session.query(Alert),
+        since_hours=since_hours,
+        include_class0=include_class0,
+        classification=classification,
+        tier=tier,
+        source_id=source_id,
+        correlation_action=correlation_action,
+    )
     
     # Sort: classification DESC, impact_score DESC (nulls last), update_count DESC, last_seen_utc DESC
     # Note: SQLite TEXT comparison works for ISO 8601 strings
@@ -354,8 +395,58 @@ def query_recent_alerts(
         Alert.update_count.desc().nullslast(),
         Alert.last_seen_utc.desc().nullslast(),
     )
-    
+
     return q.offset(offset).limit(limit).all()
+
+
+def count_recent_alerts(
+    session: Session,
+    since_hours: Optional[int] = 24,
+    include_class0: bool = False,
+    classification: Optional[int] = None,
+    tier: Optional[str] = None,
+    source_id: Optional[str] = None,
+    correlation_action: Optional[str] = None,
+) -> int:
+    """Count alerts matching the same filters as query_recent_alerts, without pagination."""
+    q = _apply_recent_alert_filters(
+        session.query(func.count(Alert.alert_id)),
+        since_hours=since_hours,
+        include_class0=include_class0,
+        classification=classification,
+        tier=tier,
+        source_id=source_id,
+        correlation_action=correlation_action,
+    )
+    return int(q.scalar() or 0)
+
+
+def count_recent_alerts_by_classification(
+    session: Session,
+    since_hours: Optional[int] = 24,
+    include_class0: bool = False,
+) -> dict[int, int]:
+    """Count recent alerts by classification, without applying presentation limits."""
+    q = _apply_recent_alert_filters(
+        session.query(Alert.classification, func.count(Alert.alert_id)),
+        since_hours=since_hours,
+        include_class0=include_class0,
+    )
+    return {classification: int(count) for classification, count in q.group_by(Alert.classification).all()}
+
+
+def count_recent_alerts_by_tier(
+    session: Session,
+    since_hours: Optional[int] = 24,
+    include_class0: bool = False,
+) -> dict[Optional[str], int]:
+    """Count recent alerts by tier, without applying presentation limits."""
+    q = _apply_recent_alert_filters(
+        session.query(Alert.tier, func.count(Alert.alert_id)),
+        since_hours=since_hours,
+        include_class0=include_class0,
+    )
+    return {tier: int(count) for tier, count in q.group_by(Alert.tier).all()}
 
 
 def find_alert_by_id(session: Session, alert_id: str) -> Optional[Alert]:

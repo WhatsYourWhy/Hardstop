@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING, Dict
 
 from sqlalchemy.orm import Session
 
-from ..database.alert_repo import query_recent_alerts
+from ..database.alert_repo import (
+    count_recent_alerts,
+    count_recent_alerts_by_classification,
+    count_recent_alerts_by_tier,
+    query_recent_alerts,
+)
 from ..database.raw_item_repo import query_suppressed_items
 from ..output.incidents.evidence import load_incident_evidence_summary
 from ..utils.time import utc_now_z
@@ -149,42 +154,60 @@ def get_brief(
     # Parse since string
     since_hours = _parse_since(since)
     
-    # Query alerts (repo handles sorting - canonical order)
-    alerts = query_recent_alerts(
+    # Query sections independently so each section's limit applies after its filter.
+    created_alerts = query_recent_alerts(
         session,
         since_hours=since_hours,
         include_class0=include_class0,
-        limit=limit * 2,  # Get more to filter by action
+        limit=limit,
+        correlation_action="CREATED",
+    )
+    updated_alerts = query_recent_alerts(
+        session,
+        since_hours=since_hours,
+        include_class0=include_class0,
+        limit=limit,
+        correlation_action="UPDATED",
+    )
+    top_alerts = query_recent_alerts(
+        session,
+        since_hours=since_hours,
+        include_class0=include_class0,
+        classification=2,
+        limit=2,
     )
     
     # Convert to dicts (transform layer)
-    alert_dicts = [_alert_to_dict(a) for a in alerts]
+    created = [_alert_to_dict(a) for a in created_alerts]
+    updated = [_alert_to_dict(a) for a in updated_alerts]
+    top_impact = [_alert_to_dict(a) for a in top_alerts]
     
-    # Separate by correlation action (presentation shaping)
-    created = [a for a in alert_dicts if a["correlation"]["action"] == "CREATED"]
-    updated = [a for a in alert_dicts if a["correlation"]["action"] == "UPDATED"]
-    
-    # Get top impactful (presentation shaping)
-    top_impact = [
-        a for a in alert_dicts
-        if a["classification"] == 2
-    ]
+    # Top impact uses presentation shaping; created/updated preserve repo order.
     top_impact.sort(key=lambda x: (x["impact_score"] or 0), reverse=True)
-    top_impact = top_impact[:2]  # Max 2
     
-    # Count by classification (presentation shaping)
+    # Counts are aggregate facts for the full window, not section samples.
+    classification_counts = count_recent_alerts_by_classification(
+        session,
+        since_hours=since_hours,
+        include_class0=include_class0,
+    )
     counts = {
-        "impactful": len([a for a in alert_dicts if a["classification"] == 2]),
-        "relevant": len([a for a in alert_dicts if a["classification"] == 1]),
-        "interesting": len([a for a in alert_dicts if a["classification"] == 0]),
+        "impactful": classification_counts.get(2, 0),
+        "relevant": classification_counts.get(1, 0),
+        "interesting": classification_counts.get(0, 0) if include_class0 else 0,
     }
     
-    # Count by tier (presentation shaping)
+    # Count by tier for the full window.
+    tier_count_rows = count_recent_alerts_by_tier(
+        session,
+        since_hours=since_hours,
+        include_class0=include_class0,
+    )
     tier_counts = {
-        "global": len([a for a in alert_dicts if a.get("tier") == "global"]),
-        "regional": len([a for a in alert_dicts if a.get("tier") == "regional"]),
-        "local": len([a for a in alert_dicts if a.get("tier") == "local"]),
-        "unknown": len([a for a in alert_dicts if a.get("tier") is None]),  # Handle None tier
+        "global": tier_count_rows.get("global", 0),
+        "regional": tier_count_rows.get("regional", 0),
+        "local": tier_count_rows.get("local", 0),
+        "unknown": tier_count_rows.get(None, 0),  # Handle None tier
     }
     
     # Query suppressed items (via repo)
@@ -219,21 +242,31 @@ def get_brief(
             "since_hours": since_hours,
         },
         "counts": {
-            "new": len(created),
-            "updated": len(updated),
+            "new": count_recent_alerts(
+                session,
+                since_hours=since_hours,
+                include_class0=include_class0,
+                correlation_action="CREATED",
+            ),
+            "updated": count_recent_alerts(
+                session,
+                since_hours=since_hours,
+                include_class0=include_class0,
+                correlation_action="UPDATED",
+            ),
             **counts,
         },
         "tier_counts": tier_counts,
         "top": top_impact,
-        "updated": updated[:limit],
-        "created": created[:limit],
+        "updated": updated,
+        "created": created,
         "suppressed": {
             "count": suppressed_count,
             "by_rule": suppressed_by_rule_list,
             "by_source": suppressed_by_source_list,
         },
         "suppressed_legacy": {  # Keep for backward compatibility
-            "total_queried": len(alerts),
+            "total_queried": sum(classification_counts.values()),
             "limit_applied": limit,
         },
     }
