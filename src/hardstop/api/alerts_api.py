@@ -184,25 +184,17 @@ def list_alerts(
     # Query alerts (repo handles sorting - canonical order)
     alerts = query_recent_alerts(
         session,
-        since_hours=since_hours or 24 * 365,  # If no since, use 1 year as default
+        since_hours=since_hours,
         include_class0=classification is None or classification == 0,
-        limit=limit + offset,  # Get more to apply offset
+        limit=limit,
+        offset=offset,
+        classification=classification,
+        tier=tier,
+        source_id=source_id,
     )
     
-    # Apply filters that repo doesn't handle
-    filtered = alerts
-    if classification is not None:
-        filtered = [a for a in filtered if a.classification == classification]
-    if tier is not None:
-        filtered = [a for a in filtered if a.tier == tier]
-    if source_id is not None:
-        filtered = [a for a in filtered if a.source_id == source_id]
-    
-    # Apply offset and limit
-    filtered = filtered[offset:offset + limit]
-    
     # Convert to HardstopAlert models
-    return [_alert_row_to_hardstop_alert(a) for a in filtered]
+    return [_alert_row_to_hardstop_alert(a) for a in alerts]
 
 
 def get_alert_detail(

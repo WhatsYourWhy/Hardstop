@@ -1,6 +1,7 @@
 """Tests for export API contracts."""
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -78,6 +79,101 @@ def test_export_alerts_csv_has_required_columns_and_row_count(session):
     
     # Check row count (header + data rows)
     assert len(csv_lines) == len(alerts) + 1, f"CSV row count mismatch: expected {len(alerts) + 1} (header + {len(alerts)} rows), got {len(csv_lines)}"
+
+
+def test_export_alerts_filtering_happens_before_limit(session):
+    """Filtered alert exports should not silently truncate matches behind higher-ranked non-matches."""
+    from hardstop.api.alerts_api import list_alerts
+    from hardstop.database.alert_repo import upsert_new_alert_row
+
+    scope_json = json.dumps({"facilities": [], "lanes": [], "shipments": []})
+
+    for index in range(5):
+        upsert_new_alert_row(
+            session,
+            alert_id=f"ALERT-NONMATCH-{index}",
+            summary=f"Regional high-priority alert {index}",
+            risk_type="TEST",
+            classification=2,
+            status="OPEN",
+            reasoning="Test",
+            recommended_actions=None,
+            root_event_id=f"EVT-NONMATCH-{index}",
+            correlation_key=f"export:nonmatch:{index}",
+            correlation_action="CREATED",
+            impact_score=100 - index,
+            scope_json=scope_json,
+            tier="regional",
+            source_id="source-regional",
+        )
+
+    expected_ids = []
+    for index in range(3):
+        alert_id = f"ALERT-MATCH-{index}"
+        expected_ids.append(alert_id)
+        upsert_new_alert_row(
+            session,
+            alert_id=alert_id,
+            summary=f"Global lower-priority alert {index}",
+            risk_type="TEST",
+            classification=1,
+            status="OPEN",
+            reasoning="Test",
+            recommended_actions=None,
+            root_event_id=f"EVT-MATCH-{index}",
+            correlation_key=f"export:match:{index}",
+            correlation_action="CREATED",
+            impact_score=10 - index,
+            scope_json=scope_json,
+            tier="global",
+            source_id="source-global",
+        )
+
+    session.commit()
+
+    alerts = list_alerts(session, since="24h", tier="global", source_id="source-global", limit=3)
+    assert [alert.alert_id for alert in alerts] == expected_ids
+
+    export_data = json.loads(
+        export_alerts(session, since="24h", tier="global", source_id="source-global", limit=3, format="json")
+    )
+    assert [alert["alert_id"] for alert in export_data["data"]] == expected_ids
+
+
+def test_export_alerts_since_none_has_no_time_cap(session):
+    """since=None is an all-retained-alerts export, not an implicit one-year window."""
+    from hardstop.api.alerts_api import list_alerts
+    from hardstop.database.alert_repo import upsert_new_alert_row
+
+    old_timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc).isoformat()
+    scope_json = json.dumps({"facilities": [], "lanes": [], "shipments": []})
+
+    alert_row = upsert_new_alert_row(
+        session,
+        alert_id="ALERT-OLDER-THAN-ONE-YEAR",
+        summary="Retained historical alert",
+        risk_type="TEST",
+        classification=2,
+        status="OPEN",
+        reasoning="Test",
+        recommended_actions=None,
+        root_event_id="EVT-OLDER-THAN-ONE-YEAR",
+        correlation_key="export:historical",
+        correlation_action="CREATED",
+        impact_score=9,
+        scope_json=scope_json,
+        tier="global",
+        source_id="source-archive",
+    )
+    alert_row.first_seen_utc = old_timestamp
+    alert_row.last_seen_utc = old_timestamp
+    session.commit()
+
+    alerts = list_alerts(session, since=None, source_id="source-archive", limit=10)
+    assert [alert.alert_id for alert in alerts] == ["ALERT-OLDER-THAN-ONE-YEAR"]
+
+    export_data = json.loads(export_alerts(session, since=None, source_id="source-archive", limit=10, format="json"))
+    assert [alert["alert_id"] for alert in export_data["data"]] == ["ALERT-OLDER-THAN-ONE-YEAR"]
 
 
 def test_export_alerts_csv_uses_batch_repo_query(session, monkeypatch):

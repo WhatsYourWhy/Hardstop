@@ -296,37 +296,55 @@ def update_existing_alert_row(
 
 def query_recent_alerts(
     session: Session,
-    since_hours: int = 24,
+    since_hours: Optional[int] = 24,
     include_class0: bool = False,
     limit: int = 20,
+    offset: int = 0,
+    classification: Optional[int] = None,
+    tier: Optional[str] = None,
+    source_id: Optional[str] = None,
 ) -> List[Alert]:
     """
     Query alerts that were created or updated within the specified time window.
     
     Args:
         session: SQLAlchemy session
-        since_hours: How many hours back to look (default 24)
+        since_hours: How many hours back to look (default 24); if None, no time filter
         include_class0: Whether to include classification 0 alerts (default False)
         limit: Maximum number of alerts to return (default 20)
+        offset: Number of matching alerts to skip (default 0)
+        classification: Optional exact classification filter
+        tier: Optional exact tier filter
+        source_id: Optional exact source_id filter
         
     Returns:
         List of Alert rows, sorted by classification DESC, impact_score DESC,
         update_count DESC, last_seen_utc DESC
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
-    cutoff_iso = cutoff.isoformat()
-    
-    # Query: last_seen_utc >= cutoff OR first_seen_utc >= cutoff
-    q = session.query(Alert).filter(
-        or_(
-            Alert.last_seen_utc >= cutoff_iso,
-            Alert.first_seen_utc >= cutoff_iso,
+    q = session.query(Alert)
+
+    if since_hours is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+        cutoff_iso = cutoff.isoformat()
+
+        # Query: last_seen_utc >= cutoff OR first_seen_utc >= cutoff
+        q = q.filter(
+            or_(
+                Alert.last_seen_utc >= cutoff_iso,
+                Alert.first_seen_utc >= cutoff_iso,
+            )
         )
-    )
     
-    # Filter out class 0 if not included
-    if not include_class0:
+    if classification is not None:
+        q = q.filter(Alert.classification == classification)
+    elif not include_class0:
         q = q.filter(Alert.classification > 0)
+
+    if tier is not None:
+        q = q.filter(Alert.tier == tier)
+
+    if source_id is not None:
+        q = q.filter(Alert.source_id == source_id)
     
     # Sort: classification DESC, impact_score DESC (nulls last), update_count DESC, last_seen_utc DESC
     # Note: SQLite TEXT comparison works for ISO 8601 strings
@@ -337,7 +355,7 @@ def query_recent_alerts(
         Alert.last_seen_utc.desc().nullslast(),
     )
     
-    return q.limit(limit).all()
+    return q.offset(offset).limit(limit).all()
 
 
 def find_alert_by_id(session: Session, alert_id: str) -> Optional[Alert]:
