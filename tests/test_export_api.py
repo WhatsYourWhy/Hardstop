@@ -298,6 +298,68 @@ def test_get_brief_is_stable_sort_order(session):
         assert top_impacts == sorted(top_impacts, reverse=True), "top should be sorted by impact_score DESC"
 
 
+def test_get_brief_filters_actions_before_limit_and_counts_full_window(session):
+    """Brief sections and counts should not be truncated by higher-ranked mixed samples."""
+    from hardstop.database.alert_repo import upsert_new_alert_row
+
+    scope_json = json.dumps({"facilities": [], "lanes": [], "shipments": []})
+
+    for index in range(45):
+        upsert_new_alert_row(
+            session,
+            alert_id=f"ALERT-BRIEF-CREATED-{index}",
+            summary=f"High-ranked created alert {index}",
+            risk_type="TEST",
+            classification=2,
+            status="OPEN",
+            reasoning="Test",
+            recommended_actions=None,
+            root_event_id=f"EVT-BRIEF-CREATED-{index}",
+            correlation_key=f"brief:created:{index}",
+            correlation_action="CREATED",
+            impact_score=100 - index,
+            scope_json=scope_json,
+            tier="global",
+        )
+
+    upsert_new_alert_row(
+        session,
+        alert_id="ALERT-BRIEF-UPDATED",
+        summary="Lower-ranked updated alert",
+        risk_type="TEST",
+        classification=1,
+        status="UPDATED",
+        reasoning="Test",
+        recommended_actions=None,
+        root_event_id="EVT-BRIEF-UPDATED",
+        correlation_key="brief:updated",
+        correlation_action="UPDATED",
+        impact_score=1,
+        scope_json=scope_json,
+        tier="regional",
+    )
+    session.commit()
+
+    brief = get_brief(session, since="24h", include_class0=False, limit=20)
+
+    assert brief["counts"] == {
+        "new": 45,
+        "updated": 1,
+        "impactful": 45,
+        "relevant": 1,
+        "interesting": 0,
+    }
+    assert brief["tier_counts"] == {
+        "global": 45,
+        "regional": 1,
+        "local": 0,
+        "unknown": 0,
+    }
+    assert [alert["alert_id"] for alert in brief["updated"]] == ["ALERT-BRIEF-UPDATED"]
+    assert len(brief["created"]) == 20
+    assert brief["suppressed_legacy"]["total_queried"] == 46
+
+
 def test_alert_reconstruction_round_trip(session):
     """Test that alert reconstruction from DB preserves all required fields."""
     from hardstop.api.alerts_api import list_alerts
