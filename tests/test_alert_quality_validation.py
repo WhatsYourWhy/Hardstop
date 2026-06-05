@@ -2,9 +2,11 @@
 
 import pytest
 from hardstop.alerts.alert_builder import (
+    build_basic_alert,
     _compute_max_allowed_classification,
     _detect_high_impact_keywords,
 )
+from hardstop.database.schema import Facility
 from hardstop.config.loader import load_alert_quality_config
 
 
@@ -229,4 +231,44 @@ def test_missing_confidence_defaults_to_zero():
     # Should be capped at 0 due to missing confidence (treated as 0.0)
     assert max_class == 0, f"Expected class 0 for missing confidence, got {max_class}. Reasoning: {reasoning}"
     assert any("Low facility confidence" in r for r in reasoning)
+
+
+def test_source_floor_cannot_exceed_quality_cap(session, tmp_path):
+    """Policy B keeps quality caps authoritative over source classification floors."""
+    session.add(
+        Facility(
+            facility_id="PLANT-FLOOR-CAP",
+            name="Floor Cap Plant",
+            type="plant",
+            city="Avon",
+            state="IN",
+            country="US",
+            criticality_score=8,
+        )
+    )
+    session.commit()
+
+    alert = build_basic_alert(
+        {
+            "event_id": "EVT-FLOOR-CAP",
+            "title": "Supplier notice near Avon",
+            "raw_text": "Supplier notice near Avon facility.",
+            "event_type": "GENERAL",
+            "facilities": ["PLANT-FLOOR-CAP"],
+            "lanes": [],
+            "shipments": [],
+            "link_confidence": {"facility": 0.20},
+            "link_provenance": {"facility": "CITY_STATE"},
+            "trust_tier": 3,
+            "classification_floor": 1,
+        },
+        session=session,
+        incident_dest_dir=tmp_path,
+    )
+
+    assert alert.classification == 0
+    assert alert.evidence is not None
+    assert alert.evidence.diagnostics is not None
+    assert alert.evidence.diagnostics.quality_validation["max_allowed_classification"] == 0
+    assert any("not applied above quality cap 0" in reason for reason in alert.reasoning)
 

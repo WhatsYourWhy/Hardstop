@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from hardstop.alerts.alert_builder import build_basic_alert
 from hardstop.alerts.correlation import build_correlation_key
+from hardstop.database.schema import Alert, Facility
 from hardstop.output.incidents.evidence import (
     build_incident_evidence_artifact,
     load_incident_evidence_summary,
@@ -214,3 +216,58 @@ def test_incident_evidence_summary_loads_latest(tmp_path):
     assert "merge_summary" in summary
     assert summary["inputs"]["alert_id"] == "ALERT-XYZ"
     assert summary["artifact_hash"]
+
+
+def test_correlated_update_preserves_shipment_truncation_diagnostics(session, tmp_path):
+    session.add(
+        Facility(
+            facility_id="PLANT-TRUNCATION",
+            name="Truncation Plant",
+            type="plant",
+            city="Avon",
+            state="IN",
+            country="US",
+            criticality_score=8,
+        )
+    )
+    session.commit()
+
+    def event_payload(event_id, shipments, total_linked, truncated):
+        return {
+            "event_id": event_id,
+            "title": "Chemical spill at PLANT-TRUNCATION",
+            "raw_text": "Chemical spill at PLANT-TRUNCATION facility.",
+            "event_type": "SPILL",
+            "facilities": ["PLANT-TRUNCATION"],
+            "lanes": [],
+            "shipments": shipments,
+            "shipments_total_linked": total_linked,
+            "shipments_truncated": truncated,
+            "link_confidence": {"facility": 0.80},
+            "link_provenance": {"facility": "FACILITY_ID_EXACT"},
+            "trust_tier": 3,
+        }
+
+    build_basic_alert(
+        event_payload(
+            "EVT-TRUNCATED-FIRST",
+            ["SHP-001", "SHP-002", "SHP-003", "SHP-004", "SHP-005"],
+            10,
+            True,
+        ),
+        session=session,
+        incident_dest_dir=tmp_path,
+    )
+    build_basic_alert(
+        event_payload("EVT-TRUNCATED-UPDATE", ["SHP-006"], 1, False),
+        session=session,
+        incident_dest_dir=tmp_path,
+    )
+
+    alert_row = session.query(Alert).one()
+    scope = json.loads(alert_row.scope_json)
+    diagnostics = json.loads(alert_row.diagnostics_json)
+    assert scope["shipments_total_linked"] == 10
+    assert scope["shipments_truncated"] is True
+    assert diagnostics["shipments_total_linked"] == 10
+    assert diagnostics["shipments_truncated"] is True

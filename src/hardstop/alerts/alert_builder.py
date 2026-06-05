@@ -39,6 +39,13 @@ def _dedupe_preserve_order(items: List[str]) -> List[str]:
     return result
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _resolve_first_seen_utc(event: Dict[str, Any], session: Optional[Session]) -> Optional[str]:
     raw_id = event.get("raw_id")
     if raw_id and session is not None:
@@ -338,6 +345,34 @@ def _merge_scope(existing_scope_json: str | None, new_scope: Dict[str, object]) 
     return merged_scope
 
 
+def _merge_diagnostics(
+    existing_diagnostics_json: str | None,
+    new_diagnostics: Dict[str, object],
+    merged_scope: Dict[str, object],
+) -> Dict[str, object]:
+    merged_diagnostics = dict(new_diagnostics)
+    try:
+        existing_diagnostics = json.loads(existing_diagnostics_json) if existing_diagnostics_json else {}
+    except (json.JSONDecodeError, TypeError):
+        existing_diagnostics = {}
+    if not isinstance(existing_diagnostics, dict):
+        existing_diagnostics = {}
+
+    merged_scope_shipments = merged_scope.get("shipments", [])
+    scope_default_total = len(merged_scope_shipments) if isinstance(merged_scope_shipments, list) else 0
+    merged_diagnostics["shipments_total_linked"] = max(
+        _safe_int(existing_diagnostics.get("shipments_total_linked", 0) or 0),
+        _safe_int(merged_diagnostics.get("shipments_total_linked", 0) or 0),
+        _safe_int(merged_scope.get("shipments_total_linked", scope_default_total) or 0),
+    )
+    merged_diagnostics["shipments_truncated"] = bool(
+        existing_diagnostics.get("shipments_truncated")
+        or merged_diagnostics.get("shipments_truncated")
+        or merged_scope.get("shipments_truncated")
+    )
+    return merged_diagnostics
+
+
 def build_basic_alert(
     event: Dict,
     session: Optional[Session] = None,
@@ -431,13 +466,22 @@ def build_basic_alert(
         
         # Apply source policy minimum (Policy B: can raise but not above quality cap)
         if quality_config["allow_quality_override_floor"]:
-            # Quality cap is authoritative, but source policy can raise from 0
+            # Quality cap is authoritative, but source policy can raise within the cap.
             original_after_quality = classification
-            classification = max(classification, classification_min_by_source_policy)
-            if classification == classification_min_by_source_policy and original_after_quality < classification_min_by_source_policy:
+            requested_floor_classification = max(classification, classification_min_by_source_policy)
+            classification = min(requested_floor_classification, max_allowed_class)
+            if (
+                classification == classification_min_by_source_policy
+                and original_after_quality < classification_min_by_source_policy
+            ):
                 reasoning.append(
                     f"Source policy minimum: {classification_min_by_source_policy} "
                     f"(raised from quality-capped {original_after_quality})"
+                )
+            elif classification_min_by_source_policy > max_allowed_class:
+                reasoning.append(
+                    f"Source policy minimum {classification_min_by_source_policy} not applied "
+                    f"above quality cap {max_allowed_class}"
                 )
         else:
             # Policy A: floor is final (not recommended but configurable)
@@ -535,6 +579,12 @@ def build_basic_alert(
             scope.shipments = merged_scope_payload.get("shipments", scope.shipments)
             scope_payload = merged_scope_payload
             scope_json = json.dumps(scope_payload)
+            if diagnostics_payload:
+                diagnostics_payload = _merge_diagnostics(
+                    existing_alert.diagnostics_json,
+                    diagnostics_payload,
+                    scope_payload,
+                )
             
             update_existing_alert_row(
                 session,
