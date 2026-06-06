@@ -2,6 +2,7 @@
 
 import pytest
 from hardstop.alerts.alert_builder import (
+    build_basic_alert,
     _compute_max_allowed_classification,
     _detect_high_impact_keywords,
 )
@@ -229,4 +230,29 @@ def test_missing_confidence_defaults_to_zero():
     # Should be capped at 0 due to missing confidence (treated as 0.0)
     assert max_class == 0, f"Expected class 0 for missing confidence, got {max_class}. Reasoning: {reasoning}"
     assert any("Low facility confidence" in r for r in reasoning)
+
+
+def test_source_floor_cannot_exceed_quality_cap(session):
+    """Policy B keeps quality caps authoritative over source policy floors."""
+    event = {
+        "event_id": "EVT-QUALITY-FLOOR",
+        "title": "Recall notice with no network match",
+        "raw_text": "Recall notice with no network match",
+        "event_type": "RECALL",
+        "facilities": [],
+        "lanes": [],
+        "shipments": [],
+        "link_confidence": {},
+        "link_provenance": {},
+        "classification_floor": 1,
+        "trust_tier": 3,
+        "weighting_bias": 0,
+        "tier": "global",
+        "source_id": "fda_food_safety_recalls",
+    }
+
+    alert = build_basic_alert(event, session=session)
+
+    assert alert.classification == 0
+    assert alert.evidence.diagnostics.quality_validation["max_allowed_classification"] == 0
 
