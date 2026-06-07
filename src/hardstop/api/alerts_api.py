@@ -27,6 +27,13 @@ if TYPE_CHECKING:
     from ..database.schema import Alert
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _coalesce_diagnostics_payload(alert_row: "Alert") -> Optional[dict]:
     diagnostics_payload = None
     if alert_row.diagnostics_json:
@@ -50,10 +57,15 @@ def _coalesce_diagnostics_payload(alert_row: "Alert") -> Optional[dict]:
         except (json.JSONDecodeError, TypeError):
             scope_payload = {}
 
-    if "shipments_total_linked" not in diagnostics_payload and "shipments_total_linked" in scope_payload:
-        diagnostics_payload["shipments_total_linked"] = scope_payload.get("shipments_total_linked", 0)
-    if "shipments_truncated" not in diagnostics_payload and "shipments_truncated" in scope_payload:
-        diagnostics_payload["shipments_truncated"] = scope_payload.get("shipments_truncated", False)
+    if "shipments_total_linked" in scope_payload:
+        diagnostics_payload["shipments_total_linked"] = max(
+            _safe_int(diagnostics_payload.get("shipments_total_linked", 0) or 0),
+            _safe_int(scope_payload.get("shipments_total_linked", 0) or 0),
+        )
+    if "shipments_truncated" in scope_payload:
+        diagnostics_payload["shipments_truncated"] = bool(
+            diagnostics_payload.get("shipments_truncated") or scope_payload.get("shipments_truncated")
+        )
 
     diagnostics_payload.setdefault("link_confidence", {})
     diagnostics_payload.setdefault("link_provenance", {})

@@ -176,6 +176,62 @@ def test_export_alerts_since_none_has_no_time_cap(session):
     assert [alert["alert_id"] for alert in export_data["data"]] == ["ALERT-OLDER-THAN-ONE-YEAR"]
 
 
+def test_export_alerts_preserves_scope_shipment_truncation(session):
+    """Scope truncation metadata is authoritative when diagnostics lag behind it."""
+    from hardstop.api.alerts_api import list_alerts
+    from hardstop.database.alert_repo import upsert_new_alert_row
+
+    scope_json = json.dumps(
+        {
+            "facilities": ["PLANT-01"],
+            "lanes": [],
+            "shipments": ["SHP-001", "SHP-002", "SHP-003", "SHP-004", "SHP-005"],
+            "shipments_total_linked": 10,
+            "shipments_truncated": True,
+        }
+    )
+    stale_diagnostics_json = json.dumps(
+        {
+            "link_confidence": {},
+            "link_provenance": {},
+            "shipments_total_linked": 5,
+            "shipments_truncated": False,
+            "impact_score": 7,
+            "impact_score_breakdown": [],
+            "impact_score_rationale": {},
+            "quality_validation": {},
+        }
+    )
+    upsert_new_alert_row(
+        session,
+        alert_id="ALERT-TRUNCATED-SCOPE",
+        summary="Truncated shipment alert",
+        risk_type="TEST",
+        classification=2,
+        status="OPEN",
+        reasoning="Test",
+        recommended_actions=None,
+        root_event_id="EVT-TRUNCATED-SCOPE",
+        correlation_key="export:truncated-scope",
+        correlation_action="CREATED",
+        impact_score=7,
+        scope_json=scope_json,
+        diagnostics_json=stale_diagnostics_json,
+    )
+    session.commit()
+
+    alert = list_alerts(session, since="24h", limit=1)[0]
+    assert alert.evidence is not None
+    assert alert.evidence.diagnostics is not None
+    assert alert.evidence.diagnostics.shipments_total_linked == 10
+    assert alert.evidence.diagnostics.shipments_truncated is True
+
+    export_data = json.loads(export_alerts(session, since="24h", limit=1, format="json"))
+    diagnostics = export_data["data"][0]["evidence"]["diagnostics"]
+    assert diagnostics["shipments_total_linked"] == 10
+    assert diagnostics["shipments_truncated"] is True
+
+
 def test_export_alerts_csv_uses_batch_repo_query(session, monkeypatch):
     """Test that export alerts CSV uses the batch repo query instead of per-alert lookups."""
     from hardstop.api.alerts_api import list_alerts
