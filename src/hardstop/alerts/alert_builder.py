@@ -468,12 +468,11 @@ def build_basic_alert(
         if quality_config["allow_quality_override_floor"]:
             # Quality cap is authoritative, but source policy can raise within the cap.
             original_after_quality = classification
-            requested_floor_classification = max(classification, classification_min_by_source_policy)
-            classification = min(requested_floor_classification, max_allowed_class)
-            if (
-                classification == classification_min_by_source_policy
-                and original_after_quality < classification_min_by_source_policy
-            ):
+            classification = min(
+                max(classification, classification_min_by_source_policy),
+                max_allowed_class,
+            )
+            if classification > original_after_quality:
                 reasoning.append(
                     f"Source policy minimum: {classification_min_by_source_policy} "
                     f"(raised from quality-capped {original_after_quality})"

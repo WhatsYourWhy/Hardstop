@@ -57,8 +57,20 @@ def save_raw_item(
         ).first()
     
     if existing:
-        # Update fetched_at_utc but keep status
+        # A duplicate fetch is the retry signal for transient ingest failures.
         existing.fetched_at_utc = fetched_at_utc
+        if existing.status == "FAILED":
+            existing.tier = tier
+            existing.published_at_utc = candidate.get("published_at_utc")
+            if canonical_id:
+                existing.canonical_id = canonical_id
+            existing.url = candidate.get("url")
+            existing.title = candidate.get("title")
+            existing.raw_payload_json = json.dumps(candidate.get("payload", {}), default=str)
+            existing.content_hash = content_hash or compute_content_hash(candidate)
+            existing.trust_tier = trust_tier
+            existing.status = "NEW"
+            existing.error = None
         logger.debug("Raw item already exists (dedupe): %s/%s", source_id, canonical_id or content_hash[:8])
         return existing
     
