@@ -156,6 +156,9 @@ def _classification_cap_from_diagnostics(diagnostics_json: str | None) -> Option
     if not isinstance(quality_validation, dict):
         return None
 
+    if quality_validation.get("applied_policy") == "A":
+        return None
+
     try:
         return int(quality_validation["max_allowed_classification"])
     except (KeyError, TypeError, ValueError):
