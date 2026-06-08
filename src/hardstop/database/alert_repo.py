@@ -140,6 +140,31 @@ def save_root_event_ids(alert_row: Alert, ids: list[str]) -> None:
     alert_row.root_event_ids_json = json.dumps(sorted(set(ids)))
 
 
+def _classification_cap_from_diagnostics(diagnostics_json: str | None) -> Optional[int]:
+    """Extract the authoritative quality cap from alert diagnostics, if present."""
+    if not diagnostics_json:
+        return None
+
+    try:
+        diagnostics = json.loads(diagnostics_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(diagnostics, dict):
+        return None
+
+    quality_validation = diagnostics.get("quality_validation")
+    if not isinstance(quality_validation, dict):
+        return None
+
+    if quality_validation.get("applied_policy") == "A":
+        return None
+
+    try:
+        return int(quality_validation["max_allowed_classification"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def upsert_new_alert_row(
     session: Session,
     *,
@@ -238,7 +263,7 @@ def update_existing_alert_row(
         session: SQLAlchemy session
         row: Existing Alert row to update
         new_summary: New summary text
-        new_classification: New classification (takes max of old and new)
+        new_classification: New classification (takes max of old and new, then applies quality cap if present)
         root_event_id: New root event ID to add to list
         correlation_action: Correlation action for this update (default "UPDATED")
         impact_score: New impact score (optional, updates if provided)
@@ -253,7 +278,11 @@ def update_existing_alert_row(
     now_iso = now.isoformat()  # Store as ISO 8601 string for consistency
 
     row.summary = new_summary
-    row.classification = max(row.classification or 0, new_classification)
+    merged_classification = max(row.classification or 0, new_classification)
+    classification_cap = _classification_cap_from_diagnostics(diagnostics_json)
+    if classification_cap is not None:
+        merged_classification = min(merged_classification, classification_cap)
+    row.classification = merged_classification
     row.priority = row.classification  # DEPRECATED: Mirrors classification for backward compatibility only. Do not use for logic.
     row.status = "UPDATED"
     row.correlation_action = correlation_action  # Store fact about this update

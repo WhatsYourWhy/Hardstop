@@ -1,12 +1,14 @@
 """Tests for alert quality validation (confidence thresholds)."""
 
+import json
+
 import pytest
 from hardstop.alerts.alert_builder import (
     build_basic_alert,
     _compute_max_allowed_classification,
     _detect_high_impact_keywords,
 )
-from hardstop.database.schema import Facility
+from hardstop.database.schema import Alert, Facility
 from hardstop.config.loader import load_alert_quality_config
 
 
@@ -271,4 +273,107 @@ def test_source_floor_cannot_exceed_quality_cap(session, tmp_path):
     assert alert.evidence.diagnostics is not None
     assert alert.evidence.diagnostics.quality_validation["max_allowed_classification"] == 0
     assert any("not applied above quality cap 0" in reason for reason in alert.reasoning)
+
+
+def test_correlated_update_cannot_exceed_quality_cap(session, tmp_path):
+    """Persisted correlated alerts must respect the latest authoritative quality cap."""
+    session.add(
+        Facility(
+            facility_id="PLANT-CAP-UPDATE",
+            name="Cap Update Plant",
+            type="plant",
+            city="Avon",
+            state="IN",
+            country="US",
+            criticality_score=8,
+        )
+    )
+    session.commit()
+
+    def event_payload(event_id: str, facility_confidence: float):
+        return {
+            "event_id": event_id,
+            "title": "Chemical spill at PLANT-CAP-UPDATE facility",
+            "raw_text": "Chemical spill at PLANT-CAP-UPDATE facility.",
+            "event_type": "SPILL",
+            "facilities": ["PLANT-CAP-UPDATE"],
+            "lanes": [],
+            "shipments": [],
+            "link_confidence": {"facility": facility_confidence},
+            "link_provenance": {"facility": "FACILITY_ID_EXACT"},
+            "trust_tier": 3,
+        }
+
+    build_basic_alert(
+        event_payload("EVT-CAP-STRONG", 0.80),
+        session=session,
+        incident_dest_dir=tmp_path,
+    )
+    updated_alert = build_basic_alert(
+        event_payload("EVT-CAP-WEAK", 0.20),
+        session=session,
+        incident_dest_dir=tmp_path,
+    )
+
+    alert_row = session.query(Alert).one()
+    assert updated_alert.classification == 0
+    assert alert_row.classification == 0
+    assert alert_row.priority == 0
+
+
+def test_policy_a_correlated_update_respects_source_floor(session, tmp_path, monkeypatch):
+    """Policy A source floors are final and should not be capped during persistence."""
+    quality_config = load_alert_quality_config()
+    quality_config["allow_quality_override_floor"] = False
+    monkeypatch.setattr(
+        "hardstop.alerts.alert_builder.load_alert_quality_config",
+        lambda: dict(quality_config),
+    )
+
+    session.add(
+        Facility(
+            facility_id="PLANT-POLICY-A",
+            name="Policy A Plant",
+            type="plant",
+            city="Avon",
+            state="IN",
+            country="US",
+            criticality_score=8,
+        )
+    )
+    session.commit()
+
+    def event_payload(event_id: str, classification_floor: int):
+        return {
+            "event_id": event_id,
+            "title": "Supplier notice near PLANT-POLICY-A",
+            "raw_text": "Supplier notice near PLANT-POLICY-A facility.",
+            "event_type": "GENERAL",
+            "facilities": ["PLANT-POLICY-A"],
+            "lanes": [],
+            "shipments": [],
+            "link_confidence": {"facility": 0.20},
+            "link_provenance": {"facility": "CITY_STATE"},
+            "trust_tier": 3,
+            "classification_floor": classification_floor,
+        }
+
+    build_basic_alert(
+        event_payload("EVT-POLICY-A-FIRST", 0),
+        session=session,
+        incident_dest_dir=tmp_path,
+    )
+    updated_alert = build_basic_alert(
+        event_payload("EVT-POLICY-A-FLOOR", 1),
+        session=session,
+        incident_dest_dir=tmp_path,
+    )
+
+    alert_row = session.query(Alert).one()
+    diagnostics = json.loads(alert_row.diagnostics_json or "{}")
+    assert updated_alert.classification == 1
+    assert alert_row.classification == 1
+    assert alert_row.priority == 1
+    assert diagnostics["quality_validation"]["applied_policy"] == "A"
+    assert diagnostics["quality_validation"]["max_allowed_classification"] == 0
 
