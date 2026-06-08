@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from hardstop.database.raw_item_repo import (
     get_raw_items_for_ingest,
@@ -61,3 +62,50 @@ def test_refetch_failed_raw_item_requeues_for_ingest(session):
     assert json.loads(refetched.raw_payload_json) == refetched_candidate["payload"]
     assert refetched.content_hash == compute_content_hash(refetched_candidate)
     assert refetched.content_hash != original_content_hash
+
+
+def test_refetch_failed_raw_item_with_old_publish_date_survives_since_filter(session):
+    now = datetime.now(timezone.utc)
+    old_published_at = (now - timedelta(days=30)).isoformat()
+    refetched_at = now.isoformat()
+    candidate = {
+        "canonical_id": "retry-old-published",
+        "title": "Old article with transient failure",
+        "url": "https://example.test/retry-old-published",
+        "published_at_utc": old_published_at,
+        "payload": {"title": "Old article with transient failure", "description": "bad payload"},
+    }
+    refetched_candidate = {
+        **candidate,
+        "payload": {"title": "Old article with transient failure", "description": "usable payload"},
+    }
+
+    raw_item = save_raw_item(
+        session,
+        source_id="source-a",
+        tier="global",
+        candidate=candidate,
+        fetched_at_utc=(now - timedelta(days=1, minutes=1)).isoformat(),
+        trust_tier=2,
+    )
+    session.commit()
+
+    mark_raw_item_status(session, raw_item.raw_id, "FAILED", error="transient parse failure")
+    session.commit()
+
+    refetched = save_raw_item(
+        session,
+        source_id="source-a",
+        tier="global",
+        candidate=refetched_candidate,
+        fetched_at_utc=refetched_at,
+        trust_tier=2,
+    )
+    session.commit()
+
+    queued_ids = [item.raw_id for item in get_raw_items_for_ingest(session, since_hours=24)]
+
+    assert refetched.raw_id == raw_item.raw_id
+    assert refetched.status == "NEW"
+    assert refetched.published_at_utc == old_published_at
+    assert refetched.raw_id in queued_ids
