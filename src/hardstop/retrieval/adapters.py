@@ -339,6 +339,7 @@ class FEMAAdapter(SourceAdapter):
         for item in items[:self.max_items]:
             # Extract published date (try common fields)
             published_at_utc = None
+            should_skip = False
             for date_field in ["published", "sent", "created", "date", "timestamp"]:
                 if date_field in item:
                     try:
@@ -352,16 +353,21 @@ class FEMAAdapter(SourceAdapter):
                             published_at_utc = pub_dt.isoformat()
                             
                             if cutoff_time and pub_dt.timestamp() < cutoff_time:
+                                should_skip = True
                                 break
                         elif isinstance(date_val, (int, float)):
                             pub_dt = datetime.fromtimestamp(date_val, tz=timezone.utc)
                             published_at_utc = pub_dt.isoformat()
                             
                             if cutoff_time and pub_dt.timestamp() < cutoff_time:
+                                should_skip = True
                                 break
                     except (ValueError, TypeError):
                         continue
                     break
+            
+            if should_skip:
+                continue
             
             canonical_id = item.get("id") or item.get("guid") or item.get("url")
             title = item.get("title") or item.get("headline") or item.get("name")
