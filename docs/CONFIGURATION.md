@@ -19,7 +19,7 @@ Define external sources with metadata. Defaults are layered:
   - Tier 3: High trust (official sources) — +1 impact score
   - Tier 2: Medium trust (default) — no modifier
   - Tier 1: Low trust — -1 impact score
-- **classification_floor**: Minimum alert classification (0-2, default 0). Quality validation may reduce classification below this floor to prevent false positives (Policy B).
+- **classification_floor**: Source policy minimum alert classification (0-2, default 0). Under the default Policy B, the floor can raise an alert only up to the quality cap; it is not allowed to exceed weak network-linking evidence.
 - **weighting_bias**: Impact score adjustment (-2 to +2, default 0)
 - **suppress**: Per-source suppression rules
 
@@ -98,6 +98,8 @@ alert_quality:
 - Events with low facility confidence (< 0.60) are capped at classification 0
 - Ambiguous facility matches are capped at classification 1, requiring 2+ compensating factors
 - Classification 2 requires both high confidence (>= 0.70) and 2+ high-impact factors
+- `allow_quality_override_floor: true` selects Policy B: quality caps are authoritative, and source floors apply only within the cap
+- `allow_quality_override_floor: false` selects Policy A: source floors can override quality caps and are marked as `"applied_policy": "A"` in diagnostics
 - Quality validation metadata is exposed in `alert.evidence.diagnostics.quality_validation`
 
 ## CSV Data Format

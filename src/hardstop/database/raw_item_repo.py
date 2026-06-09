@@ -145,22 +145,14 @@ def get_raw_items_for_ingest(
                 continue
             query = query.filter(RawItem.tier != tier)
     
-    # Filter by time (belt-and-suspenders: both fetched_at and published_at)
+    # Filter by fetch time. Fetch adapters decide which published items are in scope;
+    # ingest must not drop freshly refetched FAILED rows just because their article
+    # timestamp is older than the retry window.
     if since_hours:
         cutoff = datetime.now(timezone.utc).timestamp() - (since_hours * 3600)
         # Compare ISO strings (lexicographic comparison works for ISO 8601)
         cutoff_iso = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
-        # Primary filter: fetched_at_utc (when we actually got it)
         query = query.filter(RawItem.fetched_at_utc >= cutoff_iso)
-        # Secondary filter: published_at_utc if available (feeds can be inconsistent)
-        # Only include items where published_at_utc is None (no date) or within window
-        from sqlalchemy import or_
-        query = query.filter(
-            or_(
-                RawItem.published_at_utc.is_(None),  # No published date = include
-                RawItem.published_at_utc >= cutoff_iso,  # Published within window = include
-            )
-        )
     
     # Order by fetched_at_utc (oldest first)
     query = query.order_by(RawItem.fetched_at_utc.asc())

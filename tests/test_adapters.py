@@ -1,6 +1,7 @@
 """Adapter-level parsing tests."""
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,35 @@ def test_fema_adapter_parses_json(mocker):
     assert second.canonical_id == "fema-2"
     assert second.title == "FEMA Alert Two"
     assert second.url == "https://example.com/fema/2"
+
+
+def test_fema_adapter_json_since_filter_skips_old_items(mocker):
+    now = datetime.now(timezone.utc)
+    payload = {
+        "items": [
+            {
+                "id": "old-alert",
+                "title": "Old FEMA Alert",
+                "url": "https://example.com/fema/old",
+                "sent": (now - timedelta(days=2)).isoformat(),
+            },
+            {
+                "id": "recent-alert",
+                "title": "Recent FEMA Alert",
+                "url": "https://example.com/fema/recent",
+                "sent": (now - timedelta(hours=1)).isoformat(),
+            },
+        ]
+    }
+    content = json.dumps(payload).encode("utf-8")
+    response = _build_response(content=content, headers={"Content-Type": "application/json"})
+    mocker.patch("requests.get", return_value=response)
+
+    adapter = FEMAAdapter(_default_source_config("fema"), _default_defaults())
+    result = adapter.fetch(since_hours=24)
+
+    assert [item.canonical_id for item in result.items] == ["recent-alert"]
+    assert result.items[0].published_at_utc == payload["items"][1]["sent"]
 
 
 def test_fema_adapter_parses_rss(mocker):
