@@ -9,6 +9,7 @@ can be referenced from RunRecords and replayed later.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,12 @@ def _parse_scope(scope_json: Any) -> Dict[str, List[str]]:
 
 def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _safe_artifact_filename(filename: str) -> str:
+    """Return a single safe path segment for externally derived artifact names."""
+    safe = re.sub(r"[^A-Za-z0-9._=-]+", "_", filename).strip("._")
+    return safe or "incident-evidence"
 
 
 @dataclass
@@ -237,7 +244,10 @@ def build_incident_evidence_artifact(
     payload = artifact.to_dict()
     artifact.artifact_hash = payload["artifact_hash"]
 
-    filename = filename_basename or f"{alert_id}__{event.get('event_id', 'event')}__{correlation_key.replace('|', '_')}"
+    filename = _safe_artifact_filename(
+        filename_basename
+        or f"{alert_id}__{event.get('event_id', 'event')}__{correlation_key.replace('|', '_')}"
+    )
     artifact_path = dest_dir / f"{filename}.json"
     artifact_path.write_text(canonical_dumps(payload), encoding="utf-8")
 

@@ -183,6 +183,32 @@ def test_incident_evidence_artifact_matches_fixture(tmp_path):
     assert artifact_path.exists()
 
 
+def test_incident_evidence_sanitizes_url_like_event_ids(tmp_path):
+    _, _, artifact_path = build_incident_evidence_artifact(
+        alert_id="ALERT-URL",
+        event={
+            "event_id": "https://alerts.example.test/feed/item/123",
+            "title": "Chemical spill at DC-01",
+            "event_type": "SPILL",
+            "facilities": ["DC-01"],
+            "lanes": ["LANE-1"],
+            "shipments": [],
+            "event_time_utc": "2024-05-02T00:00:00Z",
+        },
+        correlation_key="SPILL|DC-01|LANE-1",
+        existing_alert=None,
+        window_hours=168,
+        dest_dir=tmp_path,
+        generated_at="2024-05-02T00:00:00Z",
+        filename_basename="ALERT-URL__https://alerts.example.test/feed/item/123__SPILL_DC-01_LANE-1",
+    )
+
+    assert artifact_path.exists()
+    assert artifact_path.parent == tmp_path
+    assert "/" not in artifact_path.name
+    assert artifact_path.name == "ALERT-URL__https_alerts.example.test_feed_item_123__SPILL_DC-01_LANE-1.json"
+
+
 def test_incident_evidence_summary_loads_latest(tmp_path):
     event = {
         "event_id": "EVT-TEST-002",
