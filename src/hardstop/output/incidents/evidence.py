@@ -8,7 +8,9 @@ can be referenced from RunRecords and replayed later.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +42,34 @@ def _parse_scope(scope_json: Any) -> Dict[str, List[str]]:
 
 def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+_ARTIFACT_FILENAME_SUFFIX = ".json"
+_MAX_ARTIFACT_BASENAME_BYTES = 255 - len(_ARTIFACT_FILENAME_SUFFIX.encode("utf-8"))
+
+
+def _safe_artifact_filename(filename: str) -> str:
+    """Return a single safe path segment for externally derived artifact names."""
+    safe = re.sub(r"[^A-Za-z0-9._=-]+", "_", filename).strip("._")
+    safe = safe or "incident-evidence"
+
+    encoded = safe.encode("utf-8")
+    if len(encoded) <= _MAX_ARTIFACT_BASENAME_BYTES:
+        return safe
+
+    digest = hashlib.sha256(encoded).hexdigest()[:16]
+    separator = "__"
+    max_prefix_bytes = _MAX_ARTIFACT_BASENAME_BYTES - len(separator.encode("utf-8")) - len(digest.encode("utf-8"))
+    prefix_bytes = encoded[:max_prefix_bytes]
+    while prefix_bytes:
+        try:
+            prefix = prefix_bytes.decode("utf-8")
+            break
+        except UnicodeDecodeError:
+            prefix_bytes = prefix_bytes[:-1]
+    else:
+        prefix = ""
+    return f"{prefix}{separator}{digest}"
 
 
 @dataclass
@@ -237,7 +267,10 @@ def build_incident_evidence_artifact(
     payload = artifact.to_dict()
     artifact.artifact_hash = payload["artifact_hash"]
 
-    filename = filename_basename or f"{alert_id}__{event.get('event_id', 'event')}__{correlation_key.replace('|', '_')}"
+    filename = _safe_artifact_filename(
+        filename_basename
+        or f"{alert_id}__{event.get('event_id', 'event')}__{correlation_key.replace('|', '_')}"
+    )
     artifact_path = dest_dir / f"{filename}.json"
     artifact_path.write_text(canonical_dumps(payload), encoding="utf-8")
 
