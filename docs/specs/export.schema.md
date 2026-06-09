@@ -49,6 +49,13 @@ remain deterministic across identical inputs.
 
 ## Alerts export (`hardstop export alerts`)
 
+Alerts are read through `hardstop.api.alerts_api.list_alerts`, which applies filters before pagination:
+
+- `since`: optional window (`24h`, `72h`, `7d`, etc.); omit it to remove the time filter.
+- `classification`, `tier`, and `source_id`: exact-match filters.
+- `limit`: applied after the filters above; the export starts from the first matching row.
+- Sort order: classification descending, impact score descending, update count descending, then `last_seen_utc` descending.
+
 ### JSON format
 
 JSON export includes a list of `HardstopAlert` models serialized with `.model_dump()`.
@@ -73,7 +80,22 @@ The alert schema follows `src/hardstop/alerts/alert_models.py`.
       "model_version": "hardstop-v1",
       "confidence_score": null,
       "evidence": {
-        "diagnostics": {"impact_score": 5, "impact_score_breakdown": []},
+        "diagnostics": {
+          "link_confidence": {"facility": 0.85},
+          "link_provenance": {"facility": "FACILITY_NAME_SUBSTRING"},
+          "shipments_total_linked": 75,
+          "shipments_truncated": true,
+          "impact_score": 5,
+          "impact_score_breakdown": [],
+          "impact_score_rationale": {},
+          "quality_validation": {
+            "max_allowed_classification": 1,
+            "high_impact_factors_count": 1,
+            "facility_confidence": 0.85,
+            "facility_provenance": "FACILITY_NAME_SUBSTRING",
+            "applied_policy": "B"
+          }
+        },
         "linking_notes": [],
         "correlation": {"key": "...", "action": "CREATED", "alert_id": "ALERT-..."},
         "incident_evidence": {
@@ -87,6 +109,13 @@ The alert schema follows `src/hardstop/alerts/alert_models.py`.
 }
 ```
 
+Diagnostics are non-decisional evidence attached to the persisted alert. `quality_validation`
+explains why the classification was capped or allowed, while `shipments_total_linked` and
+`shipments_truncated` preserve bounded-linking context from correlated events. If a correlated
+update is persisted under Policy B, the stored classification is re-capped using the latest
+`quality_validation.max_allowed_classification`; Policy A diagnostics (`"applied_policy": "A"`)
+do not apply that persistence-time cap.
+
 ### CSV format
 
 CSV exports are flat and use a stable column order. The header row is:
@@ -97,6 +126,9 @@ alert_id,classification,impact_score,tier,trust_tier,source_id,correlation_actio
 
 - `impact_score` comes from alert diagnostics when present, otherwise the persisted DB value.
 - `correlation_action` is inferred from alert evidence or persisted correlation metadata.
+- Detailed diagnostics such as `quality_validation`, `shipments_total_linked`, and
+  `shipments_truncated` are JSON-only; use `--format json` when auditing quality caps or
+  truncation.
 
 ## Sources export (`hardstop export sources`)
 

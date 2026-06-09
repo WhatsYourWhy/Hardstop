@@ -240,6 +240,26 @@ Result: Classification capped at 0, unless compensating factors (trust tier, key
 
 Quality validation reasoning and metadata are included in alert `reasoning` fields and `evidence.diagnostics.quality_validation` for full auditability.
 
+### Correlated alert updates and persisted diagnostics
+
+Correlation is bounded by the correlation key and a 7-day lookup window. `build_basic_alert()` always computes the key for replay/debugging, but only persists deduplication when a database session is available. A new key creates an alert with `correlation_action = "CREATED"`; a matching key updates the existing row with `correlation_action = "UPDATED"` and appends the new root event id to the alert's provenance.
+
+Persisted updates intentionally re-check quality evidence from the latest event:
+
+- The candidate classification is first computed through the same impact-score and quality-cap path used for newly created alerts.
+- `update_existing_alert_row()` then takes the max of the previous classification and the new candidate classification.
+- If the latest diagnostics include Policy B quality validation, the merged value is capped again by `quality_validation.max_allowed_classification`.
+- Policy A diagnostics (`applied_policy = "A"`) skip this persistence-time cap, so source floors remain final for that alert update.
+
+This means a correlated update with weaker facility evidence can lower the persisted classification under Policy B. That is expected: the persisted alert reflects the strongest classification that is still justified by the latest authoritative quality cap, not merely the historical maximum score.
+
+Scope and diagnostics are merged so export/read-model consumers do not lose evidence from earlier events:
+
+- `facilities`, `lanes`, and `shipments` are deduplicated while preserving observed order.
+- `shipments_total_linked` keeps the maximum observed total across correlated events.
+- `shipments_truncated` is OR-merged; once any contributing event was truncated, the alert remains marked truncated.
+- The alerts API coalesces diagnostics with stored scope data before serializing `HardstopAlert`, so JSON exports carry the authoritative `quality_validation`, `shipments_total_linked`, and `shipments_truncated` fields.
+
 ---
 
 ## Configuration Model
