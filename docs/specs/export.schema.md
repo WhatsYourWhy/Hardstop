@@ -69,7 +69,7 @@ The alert schema follows `src/hardstop/alerts/alert_models.py`.
     {
       "alert_id": "ALERT-...",
       "risk_type": "...",
-      "classification": 2,
+      "classification": 1,
       "status": "OPEN",
       "summary": "...",
       "root_event_id": "EVT-...",
