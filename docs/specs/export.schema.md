@@ -69,7 +69,7 @@ The alert schema follows `src/hardstop/alerts/alert_models.py`.
     {
       "alert_id": "ALERT-...",
       "risk_type": "...",
-      "classification": 1,
+      "classification": 2,
       "status": "OPEN",
       "summary": "...",
       "root_event_id": "EVT-...",
@@ -89,7 +89,7 @@ The alert schema follows `src/hardstop/alerts/alert_models.py`.
           "impact_score_breakdown": [],
           "impact_score_rationale": {},
           "quality_validation": {
-            "max_allowed_classification": 1,
+            "max_allowed_classification": 2,
             "high_impact_factors_count": 1,
             "facility_confidence": 0.85,
             "facility_provenance": "FACILITY_NAME_SUBSTRING",
