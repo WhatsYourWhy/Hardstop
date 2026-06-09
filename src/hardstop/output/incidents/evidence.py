@@ -8,6 +8,7 @@ can be referenced from RunRecords and replayed later.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -43,10 +44,32 @@ def _now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+_ARTIFACT_FILENAME_SUFFIX = ".json"
+_MAX_ARTIFACT_BASENAME_BYTES = 255 - len(_ARTIFACT_FILENAME_SUFFIX.encode("utf-8"))
+
+
 def _safe_artifact_filename(filename: str) -> str:
     """Return a single safe path segment for externally derived artifact names."""
     safe = re.sub(r"[^A-Za-z0-9._=-]+", "_", filename).strip("._")
-    return safe or "incident-evidence"
+    safe = safe or "incident-evidence"
+
+    encoded = safe.encode("utf-8")
+    if len(encoded) <= _MAX_ARTIFACT_BASENAME_BYTES:
+        return safe
+
+    digest = hashlib.sha256(encoded).hexdigest()[:16]
+    separator = "__"
+    max_prefix_bytes = _MAX_ARTIFACT_BASENAME_BYTES - len(separator.encode("utf-8")) - len(digest.encode("utf-8"))
+    prefix_bytes = encoded[:max_prefix_bytes]
+    while prefix_bytes:
+        try:
+            prefix = prefix_bytes.decode("utf-8")
+            break
+        except UnicodeDecodeError:
+            prefix_bytes = prefix_bytes[:-1]
+    else:
+        prefix = ""
+    return f"{prefix}{separator}{digest}"
 
 
 @dataclass
