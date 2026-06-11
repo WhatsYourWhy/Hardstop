@@ -46,6 +46,7 @@ def _now_utc_iso() -> str:
 
 _ARTIFACT_FILENAME_SUFFIX = ".json"
 _MAX_ARTIFACT_BASENAME_BYTES = 255 - len(_ARTIFACT_FILENAME_SUFFIX.encode("utf-8"))
+_GENERATED_HASH_SUFFIX_RE = re.compile(r"__[0-9a-f]{16}$")
 
 
 def _append_stable_hash_suffix(prefix: str, digest: str) -> str:
@@ -71,7 +72,11 @@ def _safe_artifact_filename(filename: str) -> str:
     digest = hashlib.sha256(original.encode("utf-8")).hexdigest()[:16]
 
     encoded = safe.encode("utf-8")
-    if safe == original and len(encoded) <= _MAX_ARTIFACT_BASENAME_BYTES:
+    if (
+        safe == original
+        and len(encoded) <= _MAX_ARTIFACT_BASENAME_BYTES
+        and not _GENERATED_HASH_SUFFIX_RE.search(safe)
+    ):
         return safe
 
     return _append_stable_hash_suffix(safe, digest)
