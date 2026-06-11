@@ -1,5 +1,6 @@
 """Tests for alert correlation functionality."""
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -184,6 +185,9 @@ def test_incident_evidence_artifact_matches_fixture(tmp_path):
 
 
 def test_incident_evidence_sanitizes_url_like_event_ids(tmp_path):
+    basename = "ALERT-URL__https://alerts.example.test/feed/item/123__SPILL_DC-01_LANE-1"
+    digest = hashlib.sha256(basename.encode("utf-8")).hexdigest()[:16]
+
     _, _, artifact_path = build_incident_evidence_artifact(
         alert_id="ALERT-URL",
         event={
@@ -200,13 +204,119 @@ def test_incident_evidence_sanitizes_url_like_event_ids(tmp_path):
         window_hours=168,
         dest_dir=tmp_path,
         generated_at="2024-05-02T00:00:00Z",
-        filename_basename="ALERT-URL__https://alerts.example.test/feed/item/123__SPILL_DC-01_LANE-1",
+        filename_basename=basename,
     )
 
     assert artifact_path.exists()
     assert artifact_path.parent == tmp_path
     assert "/" not in artifact_path.name
-    assert artifact_path.name == "ALERT-URL__https_alerts.example.test_feed_item_123__SPILL_DC-01_LANE-1.json"
+    assert artifact_path.name == (
+        f"ALERT-URL__https_alerts.example.test_feed_item_123__SPILL_DC-01_LANE-1__{digest}.json"
+    )
+
+
+def test_incident_evidence_sanitized_filename_collisions_keep_distinct_artifacts(tmp_path):
+    unsafe_basename = "ALERT-COLLIDE__a/b__SPILL_DC-01_NONE"
+    safe_basename = "ALERT-COLLIDE__a_b__SPILL_DC-01_NONE"
+
+    _, unsafe_ref, unsafe_path = build_incident_evidence_artifact(
+        alert_id="ALERT-COLLIDE",
+        event={
+            "event_id": "a/b",
+            "title": "Unsafe id",
+            "event_type": "SPILL",
+            "facilities": ["DC-01"],
+            "lanes": [],
+            "shipments": [],
+            "event_time_utc": "2024-05-02T00:00:00Z",
+        },
+        correlation_key="SPILL|DC-01|NONE",
+        existing_alert=None,
+        window_hours=168,
+        dest_dir=tmp_path,
+        generated_at="2024-05-02T00:00:00Z",
+        filename_basename=unsafe_basename,
+    )
+    _, safe_ref, safe_path = build_incident_evidence_artifact(
+        alert_id="ALERT-COLLIDE",
+        event={
+            "event_id": "a_b",
+            "title": "Safe id",
+            "event_type": "SPILL",
+            "facilities": ["DC-01"],
+            "lanes": [],
+            "shipments": [],
+            "event_time_utc": "2024-05-02T00:00:00Z",
+        },
+        correlation_key="SPILL|DC-01|NONE",
+        existing_alert=None,
+        window_hours=168,
+        dest_dir=tmp_path,
+        generated_at="2024-05-02T00:00:00Z",
+        filename_basename=safe_basename,
+    )
+
+    assert unsafe_path != safe_path
+    assert unsafe_path.exists()
+    assert safe_path.exists()
+    assert sorted(path.name for path in tmp_path.glob("*.json")) == sorted(
+        [unsafe_path.name, safe_path.name]
+    )
+    assert unsafe_ref.hash != safe_ref.hash
+
+
+def test_incident_evidence_reserves_generated_hash_suffixes(tmp_path):
+    unsafe_basename = "ALERT-COLLIDE__a/b__SPILL_DC-01_NONE"
+    unsafe_digest = hashlib.sha256(unsafe_basename.encode("utf-8")).hexdigest()[:16]
+    generated_basename = f"ALERT-COLLIDE__a_b__SPILL_DC-01_NONE__{unsafe_digest}"
+    generated_digest = hashlib.sha256(generated_basename.encode("utf-8")).hexdigest()[:16]
+
+    _, unsafe_ref, unsafe_path = build_incident_evidence_artifact(
+        alert_id="ALERT-COLLIDE",
+        event={
+            "event_id": "a/b",
+            "title": "Unsafe id",
+            "event_type": "SPILL",
+            "facilities": ["DC-01"],
+            "lanes": [],
+            "shipments": [],
+            "event_time_utc": "2024-05-02T00:00:00Z",
+        },
+        correlation_key="SPILL|DC-01|NONE",
+        existing_alert=None,
+        window_hours=168,
+        dest_dir=tmp_path,
+        generated_at="2024-05-02T00:00:00Z",
+        filename_basename=unsafe_basename,
+    )
+    _, safe_ref, safe_path = build_incident_evidence_artifact(
+        alert_id="ALERT-COLLIDE",
+        event={
+            "event_id": f"a_b__{unsafe_digest}",
+            "title": "Safe generated-name lookalike",
+            "event_type": "SPILL",
+            "facilities": ["DC-01"],
+            "lanes": [],
+            "shipments": [],
+            "event_time_utc": "2024-05-02T00:00:00Z",
+        },
+        correlation_key="SPILL|DC-01|NONE",
+        existing_alert=None,
+        window_hours=168,
+        dest_dir=tmp_path,
+        generated_at="2024-05-02T00:00:00Z",
+        filename_basename=generated_basename,
+    )
+
+    assert unsafe_path.name == f"{generated_basename}.json"
+    assert safe_path.name == f"{generated_basename}__{generated_digest}.json"
+    assert unsafe_path != safe_path
+    assert unsafe_path.exists()
+    assert safe_path.exists()
+    assert sorted(path.name for path in tmp_path.glob("*.json")) == sorted(
+        [unsafe_path.name, safe_path.name]
+    )
+    assert unsafe_ref.hash != safe_ref.hash
 
 
 def test_incident_evidence_truncates_overlong_sanitized_filenames(tmp_path):

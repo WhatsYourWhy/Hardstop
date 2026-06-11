@@ -46,30 +46,40 @@ def _now_utc_iso() -> str:
 
 _ARTIFACT_FILENAME_SUFFIX = ".json"
 _MAX_ARTIFACT_BASENAME_BYTES = 255 - len(_ARTIFACT_FILENAME_SUFFIX.encode("utf-8"))
+_GENERATED_HASH_SUFFIX_RE = re.compile(r"__[0-9a-f]{16}$")
 
 
-def _safe_artifact_filename(filename: str) -> str:
-    """Return a single safe path segment for externally derived artifact names."""
-    safe = re.sub(r"[^A-Za-z0-9._=-]+", "_", filename).strip("._")
-    safe = safe or "incident-evidence"
-
-    encoded = safe.encode("utf-8")
-    if len(encoded) <= _MAX_ARTIFACT_BASENAME_BYTES:
-        return safe
-
-    digest = hashlib.sha256(encoded).hexdigest()[:16]
+def _append_stable_hash_suffix(prefix: str, digest: str) -> str:
     separator = "__"
     max_prefix_bytes = _MAX_ARTIFACT_BASENAME_BYTES - len(separator.encode("utf-8")) - len(digest.encode("utf-8"))
-    prefix_bytes = encoded[:max_prefix_bytes]
+    prefix_bytes = prefix.encode("utf-8")[:max_prefix_bytes]
     while prefix_bytes:
         try:
-            prefix = prefix_bytes.decode("utf-8")
+            safe_prefix = prefix_bytes.decode("utf-8")
             break
         except UnicodeDecodeError:
             prefix_bytes = prefix_bytes[:-1]
     else:
-        prefix = ""
-    return f"{prefix}{separator}{digest}"
+        safe_prefix = ""
+    return f"{safe_prefix}{separator}{digest}"
+
+
+def _safe_artifact_filename(filename: str) -> str:
+    """Return a single safe path segment for externally derived artifact names."""
+    original = filename or ""
+    safe = re.sub(r"[^A-Za-z0-9._=-]+", "_", filename).strip("._")
+    safe = safe or "incident-evidence"
+    digest = hashlib.sha256(original.encode("utf-8")).hexdigest()[:16]
+
+    encoded = safe.encode("utf-8")
+    if (
+        safe == original
+        and len(encoded) <= _MAX_ARTIFACT_BASENAME_BYTES
+        and not _GENERATED_HASH_SUFFIX_RE.search(safe)
+    ):
+        return safe
+
+    return _append_stable_hash_suffix(safe, digest)
 
 
 @dataclass
