@@ -184,6 +184,76 @@ def test_incident_evidence_artifact_matches_fixture(tmp_path):
     assert artifact_path.exists()
 
 
+def test_incident_evidence_created_alert_has_no_merge_claims(tmp_path):
+    event = {
+        "event_id": "EVT-CREATED-001",
+        "title": "Chemical spill at DC-01",
+        "event_type": "SPILL",
+        "facilities": ["DC-01"],
+        "lanes": ["LANE-1"],
+        "shipments": [],
+        "event_time_utc": "2024-05-02T00:00:00Z",
+    }
+
+    artifact, _, _ = build_incident_evidence_artifact(
+        alert_id="ALERT-CREATED",
+        event=event,
+        correlation_key="SPILL|DC-01|LANE-1",
+        existing_alert=None,
+        window_hours=168,
+        dest_dir=tmp_path,
+        generated_at="2024-05-02T00:00:00Z",
+        filename_basename="ALERT-CREATED__EVT-CREATED-001__SPILL_DC-01_LANE-1",
+    )
+
+    assert artifact.merge_reasons == []
+    assert artifact.merge_summary == []
+    assert artifact.inputs["existing_alert"] == {
+        "alert_id": None,
+        "last_seen_utc": None,
+        "root_event_ids": [],
+    }
+
+
+def test_new_alert_evidence_does_not_claim_existing_match(session, tmp_path):
+    session.add(
+        Facility(
+            facility_id="DC-01",
+            name="Distribution Center 01",
+            type="dc",
+            city="Columbus",
+            state="OH",
+            country="US",
+            criticality_score=8,
+        )
+    )
+    session.commit()
+
+    alert = build_basic_alert(
+        {
+            "event_id": "EVT-CREATED-ALERT",
+            "title": "Chemical spill at DC-01",
+            "raw_text": "Chemical spill at DC-01 distribution center.",
+            "event_type": "SPILL",
+            "facilities": ["DC-01"],
+            "lanes": [],
+            "shipments": [],
+            "event_time_utc": "2024-05-02T00:00:00Z",
+            "link_confidence": {"facility": 0.90},
+            "link_provenance": {"facility": "FACILITY_ID_EXACT"},
+            "trust_tier": 3,
+        },
+        session=session,
+        incident_dest_dir=tmp_path,
+    )
+
+    incident_summary = alert.evidence.incident_evidence
+    assert alert.evidence.correlation["action"] == "CREATED"
+    assert incident_summary.merge_reasons == []
+    assert incident_summary.merge_summary == []
+    assert "Correlation key matched existing alert" not in alert.evidence.linking_notes
+
+
 def test_incident_evidence_sanitizes_url_like_event_ids(tmp_path):
     basename = "ALERT-URL__https://alerts.example.test/feed/item/123__SPILL_DC-01_LANE-1"
     digest = hashlib.sha256(basename.encode("utf-8")).hexdigest()[:16]
