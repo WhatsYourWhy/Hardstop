@@ -108,13 +108,21 @@ def test_fema_adapter_json_since_filter_skips_old_items(mocker):
                 "url": "https://example.com/fema/recent",
                 "sent": (now - timedelta(hours=1)).isoformat(),
             },
+            {
+                "id": "second-recent-alert",
+                "title": "Second Recent FEMA Alert",
+                "url": "https://example.com/fema/second-recent",
+                "sent": (now - timedelta(minutes=30)).isoformat(),
+            },
         ]
     }
     content = json.dumps(payload).encode("utf-8")
     response = _build_response(content=content, headers={"Content-Type": "application/json"})
     mocker.patch("requests.get", return_value=response)
 
-    adapter = FEMAAdapter(_default_source_config("fema"), _default_defaults())
+    source_config = _default_source_config("fema")
+    source_config["max_items_per_fetch"] = 1
+    adapter = FEMAAdapter(source_config, _default_defaults())
     result = adapter.fetch(since_hours=24)
 
     assert [item.canonical_id for item in result.items] == ["recent-alert"]

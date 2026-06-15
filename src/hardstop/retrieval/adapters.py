@@ -84,7 +84,7 @@ class RSSAdapter(SourceAdapter):
             if since_hours:
                 cutoff_time = datetime.now(timezone.utc).timestamp() - (since_hours * 3600)
             
-            for entry in feed.entries[:self.max_items]:
+            for entry in feed.entries:
                 # Parse published date
                 published_at_utc = None
                 if hasattr(entry, "published_parsed") and entry.published_parsed:
@@ -127,6 +127,8 @@ class RSSAdapter(SourceAdapter):
                     published_at_utc=published_at_utc,
                     payload=payload,
                 ))
+                if len(candidates) >= self.max_items:
+                    break
             
             bytes_downloaded = len(response.content or b"")
             return AdapterFetchResponse(
@@ -169,7 +171,7 @@ class NWSAlertsAdapter(SourceAdapter):
             if since_hours:
                 cutoff_time = datetime.now(timezone.utc).timestamp() - (since_hours * 3600)
             
-            for feature in features[:self.max_items]:
+            for feature in features:
                 properties = feature.get("properties", {})
                 
                 # Parse sent time (NWS uses ISO 8601)
@@ -225,6 +227,8 @@ class NWSAlertsAdapter(SourceAdapter):
                     published_at_utc=published_at_utc,
                     payload=payload,
                 ))
+                if len(candidates) >= self.max_items:
+                    break
             
             bytes_downloaded = len(response.content or b"")
             return AdapterFetchResponse(
@@ -286,7 +290,7 @@ class FEMAAdapter(SourceAdapter):
         if since_hours:
             cutoff_time = datetime.now(timezone.utc).timestamp() - (since_hours * 3600)
         
-        for entry in feed.entries[:self.max_items]:
+        for entry in feed.entries:
             published_at_utc = None
             if hasattr(entry, "published_parsed") and entry.published_parsed:
                 try:
@@ -316,6 +320,8 @@ class FEMAAdapter(SourceAdapter):
                 published_at_utc=published_at_utc,
                 payload=payload,
             ))
+            if len(candidates) >= self.max_items:
+                break
         
         return candidates
     
@@ -336,7 +342,7 @@ class FEMAAdapter(SourceAdapter):
             # Try common keys
             items = data.get("items", data.get("data", data.get("results", [])))
         
-        for item in items[:self.max_items]:
+        for item in items:
             # Extract published date (try common fields)
             published_at_utc = None
             should_skip = False
@@ -380,6 +386,8 @@ class FEMAAdapter(SourceAdapter):
                 published_at_utc=published_at_utc,
                 payload=item,
             ))
+            if len(candidates) >= self.max_items:
+                break
         
         return candidates
 
