@@ -73,7 +73,9 @@ def test_pinned_demo_output_is_stable(tmp_path, session):
 
     assert payload["determinism_mode"] == "pinned"
     assert payload["determinism_context"] == determinism_context
-    expected_hash = "e36dbe8cf992b8a2e49fb2eb3d867fe9a728517fcbe6bcc19d46e66875eaa2d6"
+    assert payload["merge_reasons"] == []
+    assert payload["merge_summary"] == []
+    expected_hash = "8ab0c3c00fbd4e65164c8fed8e193452e8109b029958d38c41756d41c0968f0f"
     assert incident_summary.artifact_hash == expected_hash
     assert payload["artifact_hash"] == expected_hash
 

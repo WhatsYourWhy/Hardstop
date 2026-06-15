@@ -126,6 +126,7 @@ def _build_merge_reasons(
     event_facilities: Sequence[str],
     event_lanes: Sequence[str],
     existing_scope: Dict[str, List[str]],
+    has_existing_alert: bool,
     last_seen_utc: Optional[str],
     generated_at_utc: str,
     window_hours: int,
@@ -136,6 +137,9 @@ def _build_merge_reasons(
 
     reasons: List[Dict[str, Any]] = []
     summary: List[str] = []
+
+    if not has_existing_alert:
+        return reasons, summary, overlap
 
     reasons.append(
         {
@@ -238,6 +242,7 @@ def build_incident_evidence_artifact(
         event_facilities=scope_incoming["facilities"],
         event_lanes=scope_incoming["lanes"],
         existing_scope=scope_existing,
+        has_existing_alert=existing_alert is not None,
         last_seen_utc=getattr(existing_alert, "last_seen_utc", None),
         generated_at_utc=generated_at_utc,
         window_hours=window_hours,
