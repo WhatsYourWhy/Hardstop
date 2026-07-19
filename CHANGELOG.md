@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-19
+
 ### Added
 - Alert quality validation with confidence thresholds
   - `_compute_max_allowed_classification()` enforces confidence thresholds to prevent false positives
@@ -18,6 +20,13 @@
 - `classification_floor` renamed to `classification_min_by_source_policy` for clarity (Policy B)
 - Confidence scores default to 0.0 (not 1.0) when missing to prevent false positives
 - `AlertDiagnostics` now includes `quality_validation` metadata field
+
+### Security
+- Bumped locked dependencies to resolve known advisories: pip 26.1.2 (PYSEC-2026-196), click 8.4.2 (PYSEC-2026-2132), setuptools 83.0.0 (PYSEC-2026-3447)
+- `pip-audit` against `requirements.lock.txt` now reports no known vulnerabilities
+
+### Fixed
+- Package version realigned with the changelog: `pyproject.toml` and `hardstop.__version__` were stale at 0.3.0 and now report 1.2.0
 
 ## [1.1.0] - 2025-02-15
 
