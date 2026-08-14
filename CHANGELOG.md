@@ -103,6 +103,8 @@ and `export_schema_version: "1"` remain compatible.
   guards, so run-status evaluation would have been bypassed entirely
 
 #### Known limitations
+Each has a follow-up recorded in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 - The publication gate applies to the `hardstop run` pipeline only. A standalone
   `hardstop brief --today` is still ungated
 - A `BLOCKED` source still fetches, ingests, and produces alerts, exactly as in

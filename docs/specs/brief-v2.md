@@ -254,7 +254,8 @@ Supported sinks (examples only):
 - Breaking changes require:
   - New schema version
   - Updated docs
-  - Migration note in `EXECUTION_PLAN.md`
+  - Migration note in `CHANGELOG.md`, and a roadmap entry in
+    [`docs/ROADMAP.md`](../ROADMAP.md) if the work is staged across releases
 
 ---
 
