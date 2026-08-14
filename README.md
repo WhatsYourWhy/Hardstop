@@ -96,6 +96,7 @@ pytest
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — runtime spec, operator taxonomy, determinism contract
+- [Roadmap](docs/ROADMAP.md) — what is next, what is deferred, and why
 - [Configuration](docs/CONFIGURATION.md) — sources, suppression, quality thresholds
 - [CSV Contract](docs/CSV_CONTRACT.md) — network data format for facilities, lanes, shipments
 - [Integrations](docs/INTEGRATIONS.md) — Slack, CI/CD, and agent integration patterns
