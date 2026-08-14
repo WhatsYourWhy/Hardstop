@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Build and test infrastructure
+
+#### Fixed
+- **`tests/test_golden_run.py` now passes.** All three fixture hash assertions
+  had been failing on Windows checkouts since the fixtures were added. The
+  fixtures were never corrupted: they are stored LF and hash to exactly the
+  pinned values, but `core.autocrlf=true` with no `.gitattributes` checked them
+  out as CRLF, changing their bytes (and therefore their SHA-256). The fix is
+  `.gitattributes` pinning the working tree to LF; the pinned hashes and the
+  fixture contents are both unchanged.
+
+  This also explains the earlier churn in that file: commit `4fbab87` made the
+  tests green by repinning to the Windows CRLF hashes (which would then have
+  failed on Linux), and `a71d477` correctly reverted it.
+
+#### Added
+- `.gitattributes` normalizing tracked text files to LF. Required for any
+  byte-level hash guarantee to hold identically across platforms
+- `.github/workflows/ci.yml` — the repository's first CI. Runs the test suite on
+  a deliberate ubuntu × windows matrix (a single-OS matrix cannot catch either
+  direction of the line-ending bug above) against Python 3.10 and 3.12, plus a
+  scheduled weekly `pip-audit` against `requirements.lock.txt`
+- `[tool.pytest.ini_options]` in `pyproject.toml` pinning `testpaths`
+
 ## [1.2.0] - 2026-07-19
 
 ### Added

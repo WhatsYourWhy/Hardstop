@@ -27,6 +27,14 @@ dev = [
     "pip-audit>=2.7.3",
 ]
 
+[tool.pytest.ini_options]
+# Make a bare `pytest` collect the same set CI runs.
+#
+# Note this does not remove the working-directory requirement: several tests
+# open fixtures by repo-relative path (e.g. Path("tests/fixtures/...")), so the
+# suite must still be invoked from the repository root.
+testpaths = ["tests"]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
