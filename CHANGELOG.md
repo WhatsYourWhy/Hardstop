@@ -16,6 +16,11 @@
   This also explains the earlier churn in that file: commit `4fbab87` made the
   tests green by repinning to the Windows CRLF hashes (which would then have
   failed on Linux), and `a71d477` correctly reverted it.
+- **The package now actually imports on Python 3.10**, its declared minimum.
+  `utils/id_generator.py` and `runners/run_demo.py` imported `datetime.UTC`,
+  which was added in 3.11, so `import hardstop` raised `ImportError` on 3.10
+  while `pyproject.toml` advertised `requires-python = ">=3.10"`. Replaced with
+  the equivalent `timezone.utc`. Found by the new CI matrix on its first run.
 
 #### Added
 - `.gitattributes` normalizing tracked text files to LF. Required for any
