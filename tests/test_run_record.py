@@ -259,8 +259,22 @@ def test_cmd_incidents_replay_emits_run_record(monkeypatch, tmp_path: Path):
     assert result["artifact_hash"] == artifact.artifact_hash
     files = sorted(records_dir.glob("*.json"))
     assert len(files) >= 2  # baseline + replay
-    replay_record = json.loads(files[-1].read_text(encoding="utf-8"))
+
+    # Select by operator rather than filename order. Records are named
+    # "{started_at}_{run_id}.json", so two written within the same clock tick
+    # share a timestamp prefix and sort by their random UUID -- which made
+    # files[-1] a coin flip on Windows, where clock granularity is coarser.
+    records = [json.loads(path.read_text(encoding="utf-8")) for path in files]
+    replay_records = [
+        record for record in records
+        if record["operator_id"] == "hardstop.incidents.replay@1.0.0"
+    ]
+    assert len(replay_records) == 1, (
+        f"expected exactly one replay record, got operators: "
+        f"{[r['operator_id'] for r in records]}"
+    )
+    replay_record = replay_records[0]
+
     schema = json.loads(Path("docs/specs/run-record.schema.json").read_text(encoding="utf-8"))
     jsonschema.validate(instance=replay_record, schema=schema)
-    assert replay_record["operator_id"] == "hardstop.incidents.replay@1.0.0"
     assert replay_record["config_hash"] == fingerprint_config(snapshot)

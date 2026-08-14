@@ -1,0 +1,18 @@
+# Normalize line endings so file bytes are identical on every platform.
+#
+# Hardstop pins SHA-256 hashes of file *bytes* -- tests/test_golden_run.py
+# hashes the fixtures directly, and the canonicalization spec requires stable
+# artifact bytes. With core.autocrlf=true and no rules here, Git checked those
+# files out as CRLF on Windows, so their bytes (and hashes) differed from the
+# committed blobs and from any Linux/macOS checkout. That is why the
+# golden-run tests failed on Windows only while passing in a POSIX checkout.
+#
+# Do not relax this without also revisiting tests/test_golden_run.py.
+* text=auto eol=lf
+
+# Belt and braces for the files whose bytes are hashed directly. Keeping this
+# explicit means the guarantee survives someone loosening the global rule.
+tests/fixtures/** text eol=lf
+
+# Binary assets must never be translated.
+*.png binary

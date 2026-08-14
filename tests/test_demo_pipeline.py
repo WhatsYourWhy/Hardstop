@@ -1,5 +1,5 @@
 import json
-from datetime import UTC
+from datetime import timezone
 from pathlib import Path
 
 from hardstop.alerts.alert_builder import build_basic_alert
@@ -44,7 +44,7 @@ def test_pinned_demo_output_is_stable(tmp_path, session):
     event = link_event_to_network(event, session=session)
 
     pinned_dt = DEFAULT_PINNED_TIMESTAMP
-    pinned_iso = pinned_dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    pinned_iso = pinned_dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     event["event_time_utc"] = pinned_iso
     event["published_at_utc"] = pinned_iso
     event["scoring_now"] = pinned_dt
@@ -92,7 +92,7 @@ def test_pinned_demo_replay_is_identical(tmp_path, session):
     raw["event_id"] = "EVT-DEMO-0001"
 
     pinned_dt = DEFAULT_PINNED_TIMESTAMP
-    pinned_iso = pinned_dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    pinned_iso = pinned_dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     determinism_context = {
         "seed": DEFAULT_PINNED_SEED,
@@ -180,7 +180,7 @@ def test_no_nondeterministic_fields_in_alert_payload(tmp_path, session):
     event = link_event_to_network(event, session=session)
 
     pinned_dt = DEFAULT_PINNED_TIMESTAMP
-    pinned_iso = pinned_dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    pinned_iso = pinned_dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     event["event_time_utc"] = pinned_iso
     event["published_at_utc"] = pinned_iso
     event["scoring_now"] = pinned_dt

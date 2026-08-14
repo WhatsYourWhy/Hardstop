@@ -2,7 +2,7 @@ import argparse
 import json
 from contextlib import nullcontext
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Literal, Optional
 
@@ -17,7 +17,7 @@ from hardstop.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_PINNED_TIMESTAMP = datetime(2025, 12, 29, 17, 0, 0, tzinfo=UTC)
+DEFAULT_PINNED_TIMESTAMP = datetime(2025, 12, 29, 17, 0, 0, tzinfo=timezone.utc)
 DEFAULT_PINNED_SEED = "demo-pinned-seed.v1"
 DEFAULT_PINNED_RUN_ID = "demo-golden-run.v1"
 
@@ -31,7 +31,7 @@ class DemoDeterminismConfig:
 
     def __post_init__(self) -> None:
         if self.mode == "pinned":
-            self.timestamp = (self.timestamp or DEFAULT_PINNED_TIMESTAMP).astimezone(UTC)
+            self.timestamp = (self.timestamp or DEFAULT_PINNED_TIMESTAMP).astimezone(timezone.utc)
             self.seed = self.seed or DEFAULT_PINNED_SEED
             self.run_id = self.run_id or DEFAULT_PINNED_RUN_ID
 
@@ -42,7 +42,7 @@ class DemoDeterminismConfig:
     def timestamp_iso(self) -> Optional[str]:
         if not self.timestamp:
             return None
-        return self.timestamp.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        return self.timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def context_payload(self) -> Optional[Dict[str, str]]:
         if not self.is_pinned:
@@ -70,8 +70,8 @@ def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
     except ValueError as exc:
         raise ValueError(f"Invalid ISO8601 timestamp for pinned mode: {value}") from exc
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def main(

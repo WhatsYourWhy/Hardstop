@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly dependency audit (Mondays 06:00 UTC).
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both operating systems are load-bearing, not redundancy.
+        #
+        # tests/test_golden_run.py hashes fixture bytes directly. A Linux-only
+        # matrix cannot catch a Windows CRLF checkout changing those bytes, and
+        # a Windows-only matrix cannot catch someone pinning Windows-specific
+        # hashes. Running both is what keeps .gitattributes honest. The same
+        # applies to the export byte hashes added in v1.3.
+        os: [ubuntu-latest, windows-latest]
+        # Oldest supported (pyproject requires-python = ">=3.10") and current.
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify line endings are normalized
+        shell: bash
+        run: |
+          # Runs before anything can generate files, so any difference is
+          # attributable to checkout itself. Checked explicitly so a broken
+          # .gitattributes reports as such, rather than surfacing only as an
+          # opaque hash mismatch in test_golden_run.
+          if git diff --quiet; then
+            echo "Working tree matches the index after checkout."
+          else
+            echo "::error::Checkout differs from the index - line-ending normalization is broken."
+            git diff --stat
+            exit 1
+          fi
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        # The suite mocks all network access and has an offline tripwire
+        # (tests/test_offline_mode.py), so it is safe to run unsandboxed.
+        run: python -m pytest -q
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    # Scheduled and manual only. Deliberately not a PR gate: pip-audit queries a
+    # remote advisory database, and a network blip should not block an unrelated
+    # code review.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: python -m pip install --upgrade pip && python -m pip install pip-audit
+
+      - name: Audit locked dependencies
+        run: pip-audit --requirement requirements.lock.txt

@@ -2,7 +2,7 @@ import hashlib
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Iterator, Optional, Union
 
 
@@ -19,7 +19,7 @@ _ID_STATE: Optional[_IdDeterminismState] = None
 def _current_now() -> datetime:
     if _ID_STATE is not None:
         return _ID_STATE.now
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 def _next_suffix(length: int = 8) -> str:
@@ -56,8 +56,8 @@ def deterministic_id_context(
     """
     global _ID_STATE
 
-    normalized_now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-    normalized_now = normalized_now.astimezone(UTC)
+    normalized_now = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    normalized_now = normalized_now.astimezone(timezone.utc)
 
     seed_str = str(seed)
     previous_state = _ID_STATE
