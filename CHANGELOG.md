@@ -16,6 +16,12 @@
   This also explains the earlier churn in that file: commit `4fbab87` made the
   tests green by repinning to the Windows CRLF hashes (which would then have
   failed on Linux), and `a71d477` correctly reverted it.
+- **`test_cmd_incidents_replay_emits_run_record` is no longer flaky.** It picked
+  the replay RunRecord with `sorted(glob(...))[-1]`, but records are named
+  `{started_at}_{run_id}.json`, so two written within the same clock tick share
+  a timestamp prefix and sort by their random UUID. On Windows, where clock
+  granularity is coarser, that made the selection a coin flip. The test now
+  selects by `operator_id`. Only the test was wrong; filenames remain unique.
 - **The package now actually imports on Python 3.10**, its declared minimum.
   `utils/id_generator.py` and `runners/run_demo.py` imported `datetime.UTC`,
   which was added in 3.11, so `import hardstop` raised `ImportError` on 3.10
