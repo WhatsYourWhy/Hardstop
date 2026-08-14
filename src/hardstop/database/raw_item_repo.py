@@ -2,7 +2,7 @@
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -24,7 +24,10 @@ def save_raw_item(
 ) -> RawItem:
     """
     Save a raw item candidate to the database with deduplication.
-    
+
+    Thin wrapper over :func:`save_raw_item_with_action` that discards the
+    dedupe action. Kept for callers that only need the row.
+
     Args:
         session: SQLAlchemy session
         source_id: Source ID
@@ -32,9 +35,47 @@ def save_raw_item(
         candidate: RawItemCandidate dict
         fetched_at_utc: Optional ISO 8601 timestamp. If None, uses current time.
         trust_tier: Optional trust tier (1|2|3). Default 2 if None.
-        
+
     Returns:
         RawItem row (new or existing)
+    """
+    raw_item, _action = save_raw_item_with_action(
+        session,
+        source_id,
+        tier,
+        candidate,
+        fetched_at_utc=fetched_at_utc,
+        trust_tier=trust_tier,
+    )
+    return raw_item
+
+
+def save_raw_item_with_action(
+    session: Session,
+    source_id: str,
+    tier: str,
+    candidate: Dict,
+    fetched_at_utc: Optional[str] = None,
+    trust_tier: Optional[int] = None,
+) -> Tuple[RawItem, str]:
+    """
+    Save a raw item candidate, reporting how dedupe resolved it.
+
+    The action classifies what this fetch did to the row:
+      - ``NEW``       no existing row matched; a row was created
+      - ``RETRY``     an existing row was in FAILED status and got refreshed
+      - ``DUPLICATE`` an existing row matched and only fetched_at_utc moved
+
+    Args:
+        session: SQLAlchemy session
+        source_id: Source ID
+        tier: Tier (global, regional, local)
+        candidate: RawItemCandidate dict
+        fetched_at_utc: Optional ISO 8601 timestamp. If None, uses current time.
+        trust_tier: Optional trust tier (1|2|3). Default 2 if None.
+
+    Returns:
+        (RawItem row, fetch action)
     """
     if fetched_at_utc is None:
         fetched_at_utc = datetime.now(timezone.utc).isoformat()
@@ -59,7 +100,9 @@ def save_raw_item(
     if existing:
         # A duplicate fetch is the retry signal for transient ingest failures.
         existing.fetched_at_utc = fetched_at_utc
+        action = "DUPLICATE"
         if existing.status == "FAILED":
+            action = "RETRY"
             existing.tier = tier
             existing.published_at_utc = candidate.get("published_at_utc")
             if canonical_id:
@@ -72,7 +115,7 @@ def save_raw_item(
             existing.status = "NEW"
             existing.error = None
         logger.debug("Raw item already exists (dedupe): %s/%s", source_id, canonical_id or content_hash[:8])
-        return existing
+        return existing, action
     
     # Create new raw item
     raw_id = f"RAW-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{new_event_id().split('-')[-1]}"
@@ -99,7 +142,7 @@ def save_raw_item(
     
     session.add(raw_item)
     logger.debug("Created new raw item: %s from %s", raw_id, source_id)
-    return raw_item
+    return raw_item, "NEW"
 
 
 def get_raw_items_for_ingest(

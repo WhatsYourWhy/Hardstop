@@ -216,8 +216,12 @@ Thumbs.db
 # Hardstop runtime artifacts
 output/
 run_records/
+# `output/` matches a directory of that name at any depth, so source and test
+# directories that happen to be called "output" must be re-included explicitly.
+# Without these, new files under them are silently skipped by `git add`.
 !src/hardstop/output/
 !src/hardstop/output/README.md
+!tests/output/
 
 # Hardstop local configuration (generated via `hardstop init`)
 config/sources.yaml

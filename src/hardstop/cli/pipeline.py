@@ -20,11 +20,13 @@ from hardstop.database.migrate import (
     ensure_alert_correlation_columns,
     ensure_event_external_fields,
     ensure_raw_items_table,
+    ensure_run_raw_items_table,
     ensure_source_runs_table,
     ensure_suppression_columns,
     ensure_trust_tier_columns,
 )
-from hardstop.database.raw_item_repo import save_raw_item
+from hardstop.database.raw_item_repo import save_raw_item_with_action
+from hardstop.database.run_raw_item_repo import record_run_raw_item
 from hardstop.database.schema import SourceRun
 from hardstop.database.source_run_repo import create_source_run, get_all_source_health, list_recent_runs
 from hardstop.database.sqlite_client import session_context
@@ -35,6 +37,8 @@ from hardstop.ops.run_record import (
     fingerprint_config,
     resolve_config_snapshot,
 )
+from hardstop.ops.readiness import BROKEN as READINESS_BROKEN
+from hardstop.ops.readiness import ReadinessResult, evaluate_readiness
 from hardstop.ops.run_status import evaluate_run_status
 from hardstop.retrieval.fetcher import FetchResult, SourceFetcher
 from hardstop.runners.ingest_external import main as ingest_external_main
@@ -42,6 +46,7 @@ from hardstop.utils.logging import get_logger
 
 from ._helpers import (
     _derive_seed,
+    _escalate_run_record_failure,
     _hash_parts,
     _log_run_record_failure,
     _resolve_source_defaults,
@@ -64,6 +69,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
     output_refs: List[ArtifactRef] = []
     errors: List[Diagnostic] = []
     best_effort_metadata: dict = {}
+    record_failure: Optional[Exception] = None
 
     if run_group_id is None:
         run_group_id = str(uuid.uuid4())
@@ -83,6 +89,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
     get_engine(sqlite_path)
 
     ensure_raw_items_table(sqlite_path)
+    ensure_run_raw_items_table(sqlite_path)
     ensure_event_external_fields(sqlite_path)
     ensure_alert_correlation_columns(sqlite_path)
     ensure_trust_tier_columns(sqlite_path)
@@ -145,6 +152,10 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                 sources_config = load_sources_config()
                 all_sources = {s["id"]: s for s in get_all_sources(sources_config)}
 
+                # v1.3 lineage: (run_group_id, raw_id) is a composite PK, so a
+                # raw item touched twice in one run group is recorded once.
+                recorded_raw_ids = set()
+
                 for result in results:
                     source_id = result.source_id
                     candidates = result.items
@@ -160,7 +171,7 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                         try:
                             candidate_dict = candidate.model_dump() if hasattr(candidate, "model_dump") else candidate
 
-                            raw_item = save_raw_item(
+                            raw_item, fetch_action = save_raw_item_with_action(
                                 session,
                                 source_id=source_id,
                                 tier=tier,
@@ -171,6 +182,17 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                             if raw_item in session.new or raw_item.status == "NEW":
                                 items_new += 1
                                 total_stored += 1
+
+                            if raw_item.raw_id not in recorded_raw_ids:
+                                recorded_raw_ids.add(raw_item.raw_id)
+                                record_run_raw_item(
+                                    session,
+                                    run_group_id=run_group_id,
+                                    raw_id=raw_item.raw_id,
+                                    source_id=source_id,
+                                    content_hash=raw_item.content_hash,
+                                    fetch_action=fetch_action,
+                                )
                         except Exception as e:
                             logger.error("Failed to save raw item from %s: %s", source_id, e)
 
@@ -251,7 +273,11 @@ def cmd_fetch(args: argparse.Namespace, run_group_id: Optional[str] = None) -> N
                 best_effort=best_effort_metadata,
             )
         except Exception as record_error:
+            record_failure = record_error
             _log_run_record_failure("fetch", record_error)
+
+    # After the try/finally, never inside it -- see _escalate_run_record_failure.
+    _escalate_run_record_failure("fetch", record_failure, strict=mode == "strict")
 
 
 def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = None) -> None:
@@ -263,6 +289,7 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
     mode = "strict" if getattr(args, "strict", False) else "best-effort"
     errors: List[Diagnostic] = []
     output_refs: List[ArtifactRef] = []
+    record_failure: Optional[Exception] = None
 
     if run_group_id is None:
         run_group_id = str(uuid.uuid4())
@@ -281,6 +308,7 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
     ]
 
     ensure_raw_items_table(sqlite_path)
+    ensure_run_raw_items_table(sqlite_path)
     ensure_event_external_fields(sqlite_path)
     ensure_alert_correlation_columns(sqlite_path)
     ensure_trust_tier_columns(sqlite_path)
@@ -355,11 +383,33 @@ def cmd_ingest_external(args: argparse.Namespace, run_group_id: Optional[str] = 
                 errors=errors,
             )
         except Exception as record_error:
+            record_failure = record_error
             _log_run_record_failure("ingest", record_error)
+
+    _escalate_run_record_failure("ingest", record_failure, strict=mode == "strict")
+
+
+def _evaluate_readiness_for_run(sqlite_path: str, stale_threshold: Optional[str]) -> ReadinessResult:
+    """
+    Run the readiness checks with this module's collaborators.
+
+    The names are passed explicitly rather than letting ops.readiness import
+    its own, so that tests monkeypatching them on this module keep working.
+    """
+    return evaluate_readiness(
+        sqlite_path,
+        stale_threshold=stale_threshold,
+        load_sources_config=load_sources_config,
+        get_all_sources=get_all_sources,
+        load_suppression_config=load_suppression_config,
+        get_all_source_health=get_all_source_health,
+        session_context=session_context,
+        parse_since=_parse_since,
+    )
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    """Convenience command: fetch -> ingest external -> brief -> evaluate status."""
+    """Convenience command: fetch -> ingest external -> gate -> brief -> evaluate status."""
     from hardstop.cli.output import cmd_brief
 
     since_str = args.since or "24h"
@@ -371,6 +421,12 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     config = load_config()
     sqlite_path = config.get("storage", {}).get("sqlite_path", "hardstop.db")
+
+    # Highest exit code raised by a sub-command. SystemExit is a BaseException,
+    # so it escapes the `except Exception` guards below; catching it explicitly
+    # is what keeps Step 4 running (and its exit code authoritative) when a
+    # sub-command hard-fails on a provenance error.
+    provenance_exit = 0
 
     # Step 1: Fetch
     print("Step 1: Fetching from sources...")
@@ -385,6 +441,8 @@ def cmd_run(args: argparse.Namespace) -> None:
     )
     try:
         cmd_fetch(fetch_args, run_group_id=run_group_id)
+    except SystemExit as se:
+        provenance_exit = max(provenance_exit, int(se.code or 0))
     except Exception as e:
         logger.error("Fetch failed: %s", e, exc_info=True)
 
@@ -403,23 +461,50 @@ def cmd_run(args: argparse.Namespace) -> None:
     )
     try:
         cmd_ingest_external(ingest_args, run_group_id=run_group_id)
+    except SystemExit as se:
+        provenance_exit = max(provenance_exit, int(se.code or 0))
     except Exception as e:
         logger.error("Ingest failed: %s", e, exc_info=True)
 
+    # Step 2.5: Pre-publication readiness gate (v1.3).
+    #
+    # Runs after ingest so it observes post-ingest state. Alerts have already
+    # been created and committed at this point and are not affected; only
+    # publication of the brief is gated.
+    readiness = _evaluate_readiness_for_run(sqlite_path, stale_threshold)
+    publication = None
+    skip_brief = False
+    if readiness.state == READINESS_BROKEN:
+        if strict_mode:
+            skip_brief = True
+        else:
+            publication = {
+                "state": "DRAFT_ONLY",
+                "readiness_state": readiness.state,
+                "reasons": readiness.blockers,
+            }
+
     # Step 3: Brief
-    print("\nStep 3: Generating brief...")
-    brief_args = argparse.Namespace(
-        today=True,
-        since=since_str,
-        format="md",
-        limit=20,
-        include_class0=False,
-        strict=strict_mode,
-    )
-    try:
-        cmd_brief(brief_args, run_group_id=run_group_id)
-    except Exception as e:
-        logger.error("Brief failed: %s", e, exc_info=True)
+    if skip_brief:
+        print("\nStep 3: SKIPPED - readiness BROKEN in strict mode:")
+        for blocker in readiness.blockers:
+            print(f"  - {blocker}")
+    else:
+        print("\nStep 3: Generating brief...")
+        brief_args = argparse.Namespace(
+            today=True,
+            since=since_str,
+            format="md",
+            limit=20,
+            include_class0=False,
+            strict=strict_mode,
+        )
+        try:
+            cmd_brief(brief_args, run_group_id=run_group_id, publication=publication)
+        except SystemExit as se:
+            provenance_exit = max(provenance_exit, int(se.code or 0))
+        except Exception as e:
+            logger.error("Brief failed: %s", e, exc_info=True)
 
     # Step 4: Evaluate run status
     print("\nStep 4: Evaluating run status...")
@@ -495,74 +580,14 @@ def cmd_run(args: argparse.Namespace) -> None:
     except Exception as e:
         logger.error("Error collecting run data: %s", e, exc_info=True)
 
-    # Run doctor checks for findings
-    try:
-        try:
-            sources_config = load_sources_config()
-            all_sources = get_all_sources(sources_config)
-            enabled_sources = [s for s in all_sources if s.get("enabled", True)]
-            doctor_findings["enabled_sources_count"] = len(enabled_sources)
-        except FileNotFoundError:
-            doctor_findings["config_error"] = "sources.yaml not found"
-        except Exception as e:
-            doctor_findings["config_error"] = f"Config parse error: {str(e)}"
-
-        try:
-            suppression_config = load_suppression_config()
-            suppression_warnings = []
-            if not suppression_config.get("enabled", True):
-                suppression_warnings.append("Suppression disabled")
-            rules = suppression_config.get("rules", [])
-            rule_ids = [r.get("id") for r in rules if isinstance(r, dict) and r.get("id")]
-            if len(rule_ids) != len(set(rule_ids)):
-                suppression_warnings.append("Duplicate rule IDs found")
-            if suppression_warnings:
-                doctor_findings["suppression_warnings"] = suppression_warnings
-        except FileNotFoundError:
-            pass
-        except Exception as e:
-            logger.warning("Error checking suppression config: %s", e)
-
-        try:
-            stale_hours_value = _parse_since(stale_threshold) if stale_threshold else 48
-            if stale_hours_value is None:
-                stale_hours_value = 48
-            with session_context(sqlite_path) as session:
-                health_list = get_all_source_health(
-                    session,
-                    lookback_n=10,
-                    stale_threshold_hours=stale_hours_value,
-                )
-            blocked = [h["source_id"] for h in health_list if h.get("health_budget_state") == "BLOCKED"]
-            watch = [h["source_id"] for h in health_list if h.get("health_budget_state") == "WATCH"]
-            if blocked:
-                doctor_findings["health_budget_blockers"] = blocked
-            if watch:
-                doctor_findings["health_budget_warnings"] = watch
-        except Exception as e:
-            logger.warning("Error evaluating health budgets: %s", e)
-
-        try:
-            import sqlite3
-            conn = sqlite3.connect(sqlite_path)
-            try:
-                required_tables = ["raw_items", "events", "alerts", "source_runs"]
-                missing_tables = []
-                for table in required_tables:
-                    cur = conn.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' AND name=?;",
-                        (table,)
-                    )
-                    if not cur.fetchone():
-                        missing_tables.append(f"table: {table}")
-                if missing_tables:
-                    doctor_findings["schema_drift"] = missing_tables
-            finally:
-                conn.close()
-        except Exception as e:
-            logger.warning("Error checking schema: %s", e)
-    except Exception as e:
-        logger.warning("Error running doctor checks: %s", e)
+    # Run doctor checks for findings.
+    #
+    # Re-evaluated here rather than reusing the pre-brief result from Step 2.5:
+    # cmd_brief opens a session, which runs create_all and can materialize
+    # tables on a database where Step 1 failed early. That would flip the
+    # schema_drift finding across the Step 3 boundary. Re-running is read-only
+    # and keeps this exit code identical to pre-v1.3 behavior.
+    doctor_findings.update(_evaluate_readiness_for_run(sqlite_path, stale_threshold).findings)
 
     # Evaluate run status
     stale_hours = _parse_since(stale_threshold) if stale_threshold else 48
@@ -614,5 +639,13 @@ def cmd_run(args: argparse.Namespace) -> None:
         )
     except Exception as record_error:
         _log_run_record_failure("run-status", record_error)
+        if strict_mode:
+            # A provenance write failure is fatal in strict mode: the run's own
+            # RunRecord is the artifact that makes its decisions reproducible.
+            print(
+                f"[hardstop] RUN_RECORD_EMISSION_FAILED (run-status): {record_error}",
+                file=sys.stderr,
+            )
+            provenance_exit = max(provenance_exit, 2)
 
-    sys.exit(exit_code)
+    sys.exit(max(exit_code, provenance_exit))

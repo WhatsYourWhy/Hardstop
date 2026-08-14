@@ -1,6 +1,6 @@
 """Export API: structured data export for external consumption."""
 
-import csv
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,36 +18,51 @@ from .sources_api import get_sources_health, list_sources
 def _create_export_manifest(
     export_data: Dict[str, Any],
     artifact_refs: List[Dict[str, Any]] = None,
+    *,
+    content_bytes: bytes | None = None,
 ) -> Dict[str, Any]:
     """
     Create a self-verifying manifest for the export bundle.
-    
+
     Includes:
     - Config fingerprint (for replayability)
     - Artifact hashes (for verification)
     - Export metadata
-    
+
+    Two distinct content hashes are recorded, and they answer different
+    questions:
+
+    - ``export_data_hash`` is the canonical hash of the export payload with
+      ``exported_at_utc`` removed, so two identical exports taken at different
+      times compare equal. This is the determinism contract relied on by
+      existing consumers and must not be redefined.
+    - ``export_content_hash`` (v1.3) is the SHA-256 of the exact bytes written
+      to disk, including the live timestamp and the file's own formatting. This
+      is what lets a consumer verify the file they received is the file that
+      was exported.
+
     Args:
         export_data: The export data dictionary
         artifact_refs: Optional list of artifact references with hashes
-        
+        content_bytes: Optional exact bytes of the exported file
+
     Returns:
         Manifest dictionary with config_hash, export_data_hash, artifact_hashes, etc.
     """
     config_snapshot = resolve_config_snapshot()
     config_hash = fingerprint_config(config_snapshot)
-    
+
     # Extract artifact hashes from artifact refs
     artifact_hashes = []
     if artifact_refs:
         artifact_hashes = [ref.get("hash") for ref in artifact_refs if ref.get("hash")]
-    
+
     # Also hash the export data itself for verification.
     # Drop exported_at_utc so manifests remain stable across identical exports.
     export_data_for_hash = dict(export_data)
     export_data_for_hash.pop("exported_at_utc", None)
     export_data_hash = artifact_hash(export_data_for_hash)
-    
+
     manifest = {
         "manifest_version": "1",
         "export_schema_version": export_data.get("export_schema_version", "1"),
@@ -57,7 +72,32 @@ def _create_export_manifest(
         "artifact_hashes": sorted(artifact_hashes) if artifact_hashes else [],
         "config_snapshot": config_snapshot,  # Include full snapshot for client verification
     }
+    if content_bytes is not None:
+        manifest["export_content_hash"] = hashlib.sha256(content_bytes).hexdigest()
     return manifest
+
+
+def _collect_brief_artifact_refs(brief_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Collect incident evidence artifact hashes referenced by a brief payload.
+
+    Mirrors the loop in export_alerts, but sources hashes from the brief read
+    model (plain dicts) instead of alert models.
+    """
+    artifact_refs: List[Dict[str, Any]] = []
+    seen = set()
+    for section in ("top", "updated", "created"):
+        for alert in brief_data.get(section, []):
+            summary = alert.get("evidence_summary") or {}
+            hash_value = summary.get("artifact_hash")
+            if hash_value and hash_value not in seen:
+                seen.add(hash_value)
+                artifact_refs.append({
+                    "id": f"incident:{alert.get('alert_id')}",
+                    "hash": hash_value,
+                    "kind": "IncidentEvidence",
+                })
+    return artifact_refs
 
 
 def export_brief(
@@ -111,15 +151,22 @@ def export_brief(
     
     if format == "json":
         output = json.dumps(export_data, indent=2, sort_keys=True)
-        
+
         # Add manifest if requested
         if include_manifest and out:
-            manifest = _create_export_manifest(export_data)
+            manifest = _create_export_manifest(
+                export_data,
+                artifact_refs=_collect_brief_artifact_refs(brief_data),
+                content_bytes=output.encode("utf-8"),
+            )
             manifest_path = out.parent / f"{out.stem}.manifest.json"
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-        
+
         if out:
-            out.write_text(output, encoding="utf-8")
+            # newline="" keeps the bytes on disk equal to output.encode("utf-8").
+            # Without it Windows translates \n to \r\n and the file no longer
+            # matches export_content_hash.
+            out.write_text(output, encoding="utf-8", newline="")
             return f"Exported to {out}"
         return output
     else:
@@ -182,15 +229,19 @@ def export_alerts(
             "data": [alert.model_dump() for alert in alerts],
         }
         output = json.dumps(export_data, indent=2, sort_keys=True)
-        
+
         # Add manifest if requested
         if include_manifest and out:
-            manifest = _create_export_manifest(export_data, artifact_refs=artifact_refs)
+            manifest = _create_export_manifest(
+                export_data,
+                artifact_refs=artifact_refs,
+                content_bytes=output.encode("utf-8"),
+            )
             manifest_path = out.parent / f"{out.stem}.manifest.json"
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-        
+
         if out:
-            out.write_text(output, encoding="utf-8")
+            out.write_text(output, encoding="utf-8", newline="")
             return f"Exported to {out}"
         return output
     elif format == "csv":
@@ -256,14 +307,26 @@ def export_alerts(
         
         # Add manifest if requested (for CSV exports too)
         if include_manifest and out:
-            # For CSV, create a minimal export data dict for manifest
+            # The manifest must certify the CSV itself. Hashing the row count
+            # alone (as before v1.3) left export_data_hash unchanged when the
+            # CSV contents changed, and changing on every run because of the
+            # embedded timestamp -- so it verified nothing either way.
+            # content_sha256 rides inside export_data so it is covered by
+            # export_data_hash, which stays timestamp-independent.
+            csv_bytes = output.encode("utf-8")
             export_data_for_manifest = {
                 "export_schema_version": "1",
                 "exported_at_utc": utc_now_z(),
                 "format": "csv",
                 "row_count": len(alerts),
+                "columns": columns,
+                "content_sha256": hashlib.sha256(csv_bytes).hexdigest(),
             }
-            manifest = _create_export_manifest(export_data_for_manifest, artifact_refs=artifact_refs)
+            manifest = _create_export_manifest(
+                export_data_for_manifest,
+                artifact_refs=artifact_refs,
+                content_bytes=csv_bytes,
+            )
             manifest_path = out.parent / f"{out.stem}.manifest.json"
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
         
@@ -310,15 +373,23 @@ def export_sources(
     
     if format == "json":
         output = json.dumps(export_data, indent=2, sort_keys=True)
-        
-        # Add manifest if requested
+
+        # Add manifest if requested.
+        #
+        # artifact_hashes stays empty here by design: sources health is derived
+        # counters computed at export time, not a set of independently hashed
+        # documents. Listing a hash of the same bytes export_data_hash already
+        # covers would be self-referential and prove nothing. Byte-level
+        # verification is provided by export_content_hash instead.
         if include_manifest and out:
-            manifest = _create_export_manifest(export_data)
+            manifest = _create_export_manifest(
+                export_data, content_bytes=output.encode("utf-8")
+            )
             manifest_path = out.parent / f"{out.stem}.manifest.json"
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-        
+
         if out:
-            out.write_text(output, encoding="utf-8")
+            out.write_text(output, encoding="utf-8", newline="")
             return f"Exported to {out}"
         return output
     else:

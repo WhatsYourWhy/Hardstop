@@ -30,12 +30,84 @@
 
 #### Added
 - `.gitattributes` normalizing tracked text files to LF. Required for any
-  byte-level hash guarantee to hold identically across platforms
+  byte-hash guarantee to hold across platforms, including the `export_content_hash`
+  and RawItemBatch digests added in v1.3
 - `.github/workflows/ci.yml` — the repository's first CI. Runs the test suite on
   a deliberate ubuntu × windows matrix (a single-OS matrix cannot catch either
   direction of the line-ending bug above) against Python 3.10 and 3.12, plus a
   scheduled weekly `pip-audit` against `requirements.lock.txt`
 - `[tool.pytest.ini_options]` in `pyproject.toml` pinning `testpaths`
+
+### v1.3 provenance hardening
+
+Additive provenance and publication-gating work. **No change to decision
+semantics**: classification, impact score, scope, correlation, and suppression
+are computed exactly as in v1.2. The `alerts` table, the `brief.v1` read model,
+and `export_schema_version: "1"` remain compatible.
+
+#### Added
+- `run_raw_items` table recording exactly which raw items each run group
+  fetched (`run_group_id`, `raw_id`, `source_id`, `content_hash`,
+  `fetch_action` in `NEW|DUPLICATE|RETRY`), with the additive migration
+  `ensure_run_raw_items_table()` and `database/run_raw_item_repo.py`
+- `save_raw_item_with_action()` reports how dedupe resolved a candidate;
+  `save_raw_item()` is unchanged for existing callers
+- `ops/readiness.py` — `evaluate_readiness()` and `ReadinessResult`, a
+  pre-publication readiness check extracted from `cmd_run`'s inline doctor block
+- Pre-publication gate in `hardstop run`: readiness is evaluated after ingest
+  and before the brief. Strict mode skips the brief on `BROKEN`; best-effort
+  marks it `DRAFT_ONLY` via an additive `publication` key and a banner in the
+  markdown renderer
+- `hardstop export` now emits a RunRecord (`hardstop.export@1.0.0`). It was
+  previously the only artifact-producing command with no provenance record
+- `export_content_hash` in export manifests: SHA-256 of the exact bytes written
+  to disk
+- `--strict` flag on `brief` and all three `export` subcommands
+- `verify_artifact_payload()` — the single incident-artifact hash check, now
+  shared by `cmd_incidents_replay` and the brief read path
+
+#### Changed
+- `compute_raw_item_batch_digest()` hashes the actual per-item rows in
+  `run_raw_items` instead of approximating the batch from FETCH `SourceRun`
+  counters. Changing one raw item's content now changes the batch digest.
+  Run groups with no lineage rows (pre-v1.3 databases, older run groups,
+  `sources test`) fall back to the previous counts digest unchanged
+- `load_incident_evidence_summary()` now verifies the stored `artifact_hash`
+  against the payload. Previously it recomputed the hash but used it only as a
+  fallback for a missing value, so a tampered or stale hash was trusted
+  silently. Strict mode raises `IncidentArtifactMismatchError`; best-effort
+  warns and flags the summary with `artifact_hash_verified: false`
+- The CSV export manifest hashes the actual CSV bytes. It previously hashed a
+  placeholder dict of `{schema_version, format, row_count}` containing a fresh
+  timestamp, so it changed on every run and certified nothing about the CSV
+- `export_brief` populates `artifact_hashes` from incident evidence; it
+  previously always emitted an empty list. `export_sources` keeps an empty list
+  by design (sources health is derived counters, not hashed documents) and is
+  covered by `export_content_hash` instead
+- In strict mode, a RunRecord emission failure is now fatal (exit code 2) for
+  `fetch`, `ingest-external`, `brief`, `export`, and `run`, with a distinct
+  `RUN_RECORD_EMISSION_FAILED` stderr marker. Best-effort mode still warns and
+  continues. A command's own exception always takes precedence over a
+  provenance failure
+- JSON exports are written with `newline=""`. On Windows the bytes on disk were
+  previously CRLF-translated and therefore did not match any hash of the
+  serialized payload
+
+#### Fixed
+- `.gitignore` re-includes `tests/output/`. The bare `output/` rule matches a
+  directory of that name at any depth, so new files under `tests/output/` were
+  silently skipped by `git add` — the existing test there is tracked only
+  because it was force-added
+- `SystemExit` raised by a sub-command no longer skips Step 4 of `hardstop run`.
+  `SystemExit` is a `BaseException` and escaped the existing `except Exception`
+  guards, so run-status evaluation would have been bypassed entirely
+
+#### Known limitations
+- The publication gate applies to the `hardstop run` pipeline only. A standalone
+  `hardstop brief --today` is still ungated
+- A `BLOCKED` source still fetches, ingests, and produces alerts, exactly as in
+  v1.x. Only publication is gated. Gating alert creation would change frozen v1
+  decision behavior and needs its own proposal
 
 ## [1.2.0] - 2026-07-19
 

@@ -134,3 +134,42 @@ def test_render_markdown_with_missing_unknown_tier_count():
     markdown = render_markdown(brief_data)
 
     assert "- **Tier:** Global 2 | Regional 1" in markdown
+
+
+def _quiet_brief_data(**extra):
+    data = {
+        "read_model_version": "brief.v1",
+        "generated_at_utc": "2024-05-02T00:00:00Z",
+        "window": {"since": "24h", "since_hours": 24},
+        "counts": {"new": 0, "updated": 0, "impactful": 0, "relevant": 0, "interesting": 0},
+        "tier_counts": {"global": 0, "regional": 0, "local": 0, "unknown": 0},
+        "top": [],
+        "updated": [],
+        "created": [],
+        "suppressed": {"count": 0, "by_rule": [], "by_source": []},
+        "suppressed_legacy": {"total_queried": 0, "limit_applied": 20},
+    }
+    data.update(extra)
+    return data
+
+
+def test_render_markdown_shows_draft_only_banner():
+    """A non-authoritative brief must say so, even on a quiet day."""
+    markdown = render_markdown(
+        _quiet_brief_data(
+            publication={
+                "state": "DRAFT_ONLY",
+                "readiness_state": "BROKEN",
+                "reasons": ["1 source(s) exhausted failure budget: src-bad"],
+            }
+        )
+    )
+    assert "**DRAFT_ONLY** — not authoritative" in markdown
+    assert "src-bad" in markdown
+
+
+def test_render_markdown_omits_banner_when_authoritative():
+    """No publication block means no banner: brief.v1 output is unchanged."""
+    markdown = render_markdown(_quiet_brief_data())
+    assert "not authoritative" not in markdown
+    assert "DRAFT_ONLY" not in markdown

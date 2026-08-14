@@ -293,6 +293,11 @@ def main() -> None:
         action="store_true",
         help="Include classification 0 (Interesting) alerts",
     )
+    brief_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail (exit code 2) if provenance cannot be recorded",
+    )
     brief_parser.set_defaults(func=cmd_brief)
 
     # doctor command
@@ -309,6 +314,9 @@ def main() -> None:
     export_brief_parser.add_argument("--limit", type=int, default=20, help="Max alerts per section (default: 20)")
     export_brief_parser.add_argument("--format", type=str, choices=["json"], default="json", help="Export format")
     export_brief_parser.add_argument("--out", type=Path, help="Output file path")
+    export_brief_parser.add_argument(
+        "--strict", action="store_true", help="Fail (exit code 2) if provenance cannot be recorded"
+    )
     export_brief_parser.set_defaults(func=cmd_export)
 
     export_alerts_parser = export_subparsers.add_parser("alerts", help="Export alerts data")
@@ -319,6 +327,9 @@ def main() -> None:
     export_alerts_parser.add_argument("--limit", type=int, default=50, help="Max alerts (default: 50)")
     export_alerts_parser.add_argument("--format", type=str, choices=["json", "csv"], default="json", help="Export format")
     export_alerts_parser.add_argument("--out", type=Path, help="Output file path")
+    export_alerts_parser.add_argument(
+        "--strict", action="store_true", help="Fail (exit code 2) if provenance cannot be recorded"
+    )
     export_alerts_parser.set_defaults(func=cmd_export)
 
     export_sources_parser = export_subparsers.add_parser("sources", help="Export sources health data")
@@ -326,6 +337,9 @@ def main() -> None:
     export_sources_parser.add_argument("--stale", type=str, default="72h", help="Stale threshold (default: 72h)")
     export_sources_parser.add_argument("--format", type=str, choices=["json"], default="json", help="Export format")
     export_sources_parser.add_argument("--out", type=Path, help="Output file path")
+    export_sources_parser.add_argument(
+        "--strict", action="store_true", help="Fail (exit code 2) if provenance cannot be recorded"
+    )
     export_sources_parser.set_defaults(func=cmd_export)
 
     # init command

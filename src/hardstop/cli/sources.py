@@ -14,6 +14,7 @@ from hardstop.database.migrate import (
     ensure_alert_correlation_columns,
     ensure_event_external_fields,
     ensure_raw_items_table,
+    ensure_run_raw_items_table,
     ensure_source_runs_table,
     ensure_trust_tier_columns,
 )
@@ -68,6 +69,7 @@ def cmd_sources_test(args: argparse.Namespace) -> None:
     from hardstop.database.sqlite_client import get_engine
     get_engine(sqlite_path)
     ensure_raw_items_table(sqlite_path)
+    ensure_run_raw_items_table(sqlite_path)
     ensure_event_external_fields(sqlite_path)
     ensure_alert_correlation_columns(sqlite_path)
     ensure_trust_tier_columns(sqlite_path)
