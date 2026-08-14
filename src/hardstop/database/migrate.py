@@ -271,3 +271,44 @@ def ensure_source_runs_table(sqlite_path: str) -> None:
                 conn.commit()
     finally:
         conn.close()
+
+
+def ensure_run_raw_items_table(sqlite_path: str) -> None:
+    """
+    Create run_raw_items table if missing (v1.3).
+
+    Records exactly which raw items each run group fetched, so the
+    RawItemBatch artifact digest can hash real item content instead of
+    approximating it from FETCH SourceRun counters.
+
+    Args:
+        sqlite_path: Path to SQLite database file
+    """
+    conn = sqlite3.connect(sqlite_path)
+    try:
+        table_missing = not _table_exists(conn, "run_raw_items")
+        if table_missing:
+            conn.execute("""
+                CREATE TABLE run_raw_items (
+                    run_group_id TEXT NOT NULL,
+                    raw_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    content_hash TEXT,
+                    fetch_action TEXT NOT NULL,
+                    recorded_at_utc TEXT,
+                    PRIMARY KEY (run_group_id, raw_id)
+                );
+            """)
+            # Create indexes
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_run_raw_items_run_group_id ON run_raw_items(run_group_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_run_raw_items_source_id ON run_raw_items(source_id);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_run_raw_items_content_hash ON run_raw_items(content_hash);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_run_raw_items_run_group_source ON run_raw_items(run_group_id, source_id);")
+            conn.commit()
+        else:
+            # Add recorded_at_utc column if this is an upgraded install
+            if not _column_exists(conn, "run_raw_items", "recorded_at_utc"):
+                conn.execute("ALTER TABLE run_raw_items ADD COLUMN recorded_at_utc TEXT;")
+                conn.commit()
+    finally:
+        conn.close()

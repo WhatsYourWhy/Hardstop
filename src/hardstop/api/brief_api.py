@@ -69,10 +69,12 @@ def _load_scope(alert: "Alert") -> Dict:
         }
 
 
-def _alert_to_dict(alert: "Alert") -> Dict:
+def _alert_to_dict(alert: "Alert", strict: bool = False) -> Dict:
     """Convert Alert row to dict for brief output (v0.7: includes tier and trust_tier)."""
     scope = _load_scope(alert)
-    evidence_summary = load_incident_evidence_summary(alert.alert_id, alert.correlation_key or "")
+    evidence_summary = load_incident_evidence_summary(
+        alert.alert_id, alert.correlation_key or "", strict=strict
+    )
     
     return {
         "alert_id": alert.alert_id,
@@ -99,6 +101,7 @@ def get_brief(
     since: str,  # "24h", "72h", "7d"
     include_class0: bool = False,
     limit: int = 20,
+    strict: bool = False,
 ) -> Dict:
     """
     Generate brief read model (BriefReadModel v1).
@@ -178,9 +181,9 @@ def get_brief(
     )
     
     # Convert to dicts (transform layer)
-    created = [_alert_to_dict(a) for a in created_alerts]
-    updated = [_alert_to_dict(a) for a in updated_alerts]
-    top_impact = [_alert_to_dict(a) for a in top_alerts]
+    created = [_alert_to_dict(a, strict=strict) for a in created_alerts]
+    updated = [_alert_to_dict(a, strict=strict) for a in updated_alerts]
+    top_impact = [_alert_to_dict(a, strict=strict) for a in top_alerts]
     
     # Top impact uses presentation shaping; created/updated preserve repo order.
     top_impact.sort(key=lambda x: (x["impact_score"] or 0), reverse=True)

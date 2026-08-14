@@ -52,6 +52,42 @@ def _log_run_record_failure(context: str, error: Exception) -> None:
     print(f"[hardstop] RunRecord emission failure ({context}): {error}", file=sys.stderr)
 
 
+def _escalate_run_record_failure(
+    context: str,
+    error: Optional[Exception],
+    *,
+    strict: bool,
+) -> None:
+    """
+    Turn a recorded RunRecord emission failure into exit code 2 (v1.3).
+
+    Call this *after* the try/finally that attempted emission, never inside the
+    finally: raising from a finally block would mask the command's own
+    exception and report a provenance failure for what was really a command
+    failure.
+
+    A distinct stderr marker is emitted so callers and CI can tell a provenance
+    failure apart from the other exit-2 conditions (schema drift, blocked
+    sources), which share the same exit code under the v1.0 0/1/2 contract.
+
+    Args:
+        context: Command name for the message (e.g. "brief")
+        error: The captured emission error, or None if emission succeeded
+        strict: Whether the command ran in strict mode
+
+    Raises:
+        SystemExit: exit code 2, when strict and an error was captured
+    """
+    if error is None or not strict:
+        return
+    logger.error("RunRecord emission failed in strict mode (%s): %s", context, error)
+    print(
+        f"[hardstop] RUN_RECORD_EMISSION_FAILED ({context}): {error}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+
 def _safe_raw_batch_hash(sqlite_path: str, run_group_id: str, fallback_parts: Iterable[str]) -> str:
     try:
         return compute_raw_item_batch_digest(sqlite_path, run_group_id)

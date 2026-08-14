@@ -696,11 +696,17 @@ def test_export_bundle_is_deterministic(tmp_path, session):
     assert "artifact_hashes" in manifest_data_1, "Manifest must include artifact_hashes"
     assert "config_snapshot" in manifest_data_1, "Manifest must include config_snapshot"
     
-    # Manifests should be identical (excluding exported_at_utc which may differ slightly)
-    manifest_1_no_time = {k: v for k, v in manifest_data_1.items() if k != "exported_at_utc"}
-    manifest_2_no_time = {k: v for k, v in manifest_data_2.items() if k != "exported_at_utc"}
-    
+    # Manifests should be identical (excluding exported_at_utc which may differ slightly).
+    # export_content_hash is excluded for the same reason: it hashes the exact
+    # file bytes, which embed the live exported_at_utc, so it is intentionally
+    # time-dependent. export_data_hash is the time-independent hash and is
+    # still required to match.
+    volatile = {"exported_at_utc", "export_content_hash"}
+    manifest_1_no_time = {k: v for k, v in manifest_data_1.items() if k not in volatile}
+    manifest_2_no_time = {k: v for k, v in manifest_data_2.items() if k not in volatile}
+
     assert manifest_1_no_time == manifest_2_no_time, "Manifests (excluding timestamps) must be identical"
+    assert manifest_data_1["export_data_hash"] == manifest_data_2["export_data_hash"]
     
     # Verify config_hash is stable
     assert manifest_data_1["config_hash"] == manifest_data_2["config_hash"], "Config hash must be stable"
@@ -819,3 +825,112 @@ def test_export_bundle_is_deterministic(tmp_path, session):
     sources_data_2_no_time = {k: v for k, v in sources_data_2.items() if k != "exported_at_utc"}
     
     assert sources_data_1_no_time == sources_data_2_no_time, "Sources data (excluding timestamps) must be identical"
+
+
+# --- v1.3 export provenance ---------------------------------------------------
+
+
+def _upsert_alert(session, alert_id="ALERT-EXPORT-1"):
+    from hardstop.database.alert_repo import upsert_new_alert_row
+
+    upsert_new_alert_row(
+        session,
+        alert_id=alert_id,
+        summary="Export provenance fixture",
+        risk_type="TEST",
+        classification=2,
+        status="OPEN",
+        reasoning="Test",
+        recommended_actions=None,
+        root_event_id=f"EVT-{alert_id}",
+        correlation_key=f"export:prov:{alert_id}",
+        correlation_action="CREATED",
+        impact_score=50,
+        scope_json=json.dumps({"facilities": [], "lanes": [], "shipments": []}),
+        tier="global",
+        source_id="source-1",
+    )
+    session.commit()
+
+
+def test_export_json_file_bytes_match_content_hash(session, tmp_path):
+    """
+    The manifest must certify the file on disk.
+
+    This is also the regression guard for newline translation: without
+    newline="" the JSON writes land as CRLF on Windows and no longer hash to
+    export_content_hash.
+    """
+    import hashlib
+
+    _upsert_alert(session)
+    out = tmp_path / "alerts.json"
+    export_alerts(session, since=None, limit=50, format="json", out=out, include_manifest=True)
+
+    manifest = json.loads((tmp_path / "alerts.manifest.json").read_text(encoding="utf-8"))
+    on_disk = hashlib.sha256(out.read_bytes()).hexdigest()
+
+    assert manifest["export_content_hash"] == on_disk
+    assert b"\r\n" not in out.read_bytes()
+
+
+def test_export_csv_manifest_hashes_actual_bytes(session, tmp_path):
+    """
+    The CSV manifest must change when the CSV content changes.
+
+    Before v1.3 it hashed a placeholder dict of {schema_version, format,
+    row_count}, so editing an alert summary left export_data_hash untouched.
+    """
+    import hashlib
+
+    _upsert_alert(session, alert_id="ALERT-CSV-1")
+    out_a = tmp_path / "a.csv"
+    export_alerts(session, since=None, limit=50, format="csv", out=out_a, include_manifest=True)
+    manifest_a = json.loads((tmp_path / "a.manifest.json").read_text(encoding="utf-8"))
+
+    # Same row count, different content.
+    from hardstop.database.alert_repo import find_alert_by_id
+
+    row = find_alert_by_id(session, "ALERT-CSV-1")
+    row.summary = "A completely different summary"
+    session.commit()
+
+    out_b = tmp_path / "b.csv"
+    export_alerts(session, since=None, limit=50, format="csv", out=out_b, include_manifest=True)
+    manifest_b = json.loads((tmp_path / "b.manifest.json").read_text(encoding="utf-8"))
+
+    assert manifest_a["export_data_hash"] != manifest_b["export_data_hash"], (
+        "CSV manifest must be sensitive to CSV content, not just row count"
+    )
+    assert manifest_b["export_content_hash"] == hashlib.sha256(out_b.read_bytes()).hexdigest()
+    assert manifest_b["export_schema_version"] == "1"
+
+
+def test_export_brief_manifest_includes_incident_artifact_hashes(session, tmp_path, monkeypatch):
+    """export_brief previously always emitted an empty artifact_hashes list."""
+    import hardstop.api.brief_api as brief_api
+
+    _upsert_alert(session, alert_id="ALERT-BRIEF-1")
+    monkeypatch.setattr(
+        brief_api,
+        "load_incident_evidence_summary",
+        lambda *_a, **_k: {"artifact_hash": "deadbeef", "merge_summary": []},
+    )
+
+    out = tmp_path / "brief.json"
+    export_brief(session, since="24h", limit=20, format="json", out=out, include_manifest=True)
+    manifest = json.loads((tmp_path / "brief.manifest.json").read_text(encoding="utf-8"))
+
+    assert "deadbeef" in manifest["artifact_hashes"]
+
+
+def test_export_sources_manifest_documents_empty_artifact_hashes(session, tmp_path):
+    """Sources health has no independently hashed artifacts; content hash covers it."""
+    import hashlib
+
+    out = tmp_path / "sources.json"
+    export_sources(session, format="json", out=out, include_manifest=True)
+    manifest = json.loads((tmp_path / "sources.manifest.json").read_text(encoding="utf-8"))
+
+    assert manifest["artifact_hashes"] == []
+    assert manifest["export_content_hash"] == hashlib.sha256(out.read_bytes()).hexdigest()

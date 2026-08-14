@@ -17,6 +17,7 @@ def generate_brief(
     since_hours: int = 24,
     include_class0: bool = False,
     limit: int = 20,
+    strict: bool = False,
 ) -> Dict:
     """
     Generate daily brief data structure.
@@ -32,12 +33,20 @@ def generate_brief(
         since_hours: How many hours back to look
         include_class0: Whether to include classification 0 alerts
         limit: Maximum number of alerts to return
-        
+        strict: Fail instead of warning when incident evidence fails hash
+            verification
+
     Returns:
         Dict with brief data (BriefReadModel v1 format)
     """
     since_str = f"{since_hours}h"
-    return get_brief(session, since=since_str, include_class0=include_class0, limit=limit)
+    return get_brief(
+        session,
+        since=since_str,
+        include_class0=include_class0,
+        limit=limit,
+        strict=strict,
+    )
 
 
 def render_markdown(brief_data: Dict) -> str:
@@ -46,11 +55,14 @@ def render_markdown(brief_data: Dict) -> str:
 
     def _evidence_lines(alert: Dict) -> list[str]:
         evidence_summary = alert.get("evidence_summary") or {}
+        # v1.3: flagged only when the stored hash disagreed with the payload.
+        # A green evidence line must not imply verification that did not happen.
+        unverified = " (UNVERIFIED)" if evidence_summary.get("artifact_hash_verified") is False else ""
         merge_summary = evidence_summary.get("merge_summary") or []
         if merge_summary:
-            return [f"  - Evidence: {'; '.join(merge_summary)}"]
+            return [f"  - Evidence{unverified}: {'; '.join(merge_summary)}"]
         if evidence_summary.get("artifact_hash"):
-            return [f"  - Evidence: artifact {evidence_summary['artifact_hash'][:8]}"]
+            return [f"  - Evidence{unverified}: artifact {evidence_summary['artifact_hash'][:8]}"]
         return []
     
     # Header
@@ -63,7 +75,17 @@ def render_markdown(brief_data: Dict) -> str:
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     lines.append(f"# Hardstop Daily Brief — {date_str} (since {since_str})")
     lines.append("")
-    
+
+    # Publication banner (v1.3). Rendered before the quiet-day early return so
+    # a non-authoritative brief is never silently indistinguishable from an
+    # authoritative one. Absent for authoritative briefs.
+    publication = brief_data.get("publication") or {}
+    publication_state = publication.get("state")
+    if publication_state and publication_state != "AUTHORITATIVE":
+        reasons = "; ".join(publication.get("reasons", [])) or "readiness check failed"
+        lines.append(f"> **{publication_state}** — not authoritative: {reasons}")
+        lines.append("")
+
     # Counts
     counts = brief_data["counts"]
     tier_counts = brief_data.get(

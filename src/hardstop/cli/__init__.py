@@ -42,11 +42,17 @@ from hardstop.database.migrate import (
     ensure_alert_correlation_columns,
     ensure_event_external_fields,
     ensure_raw_items_table,
+    ensure_run_raw_items_table,
     ensure_source_runs_table,
     ensure_suppression_columns,
     ensure_trust_tier_columns,
 )
-from hardstop.database.raw_item_repo import save_raw_item, summarize_suppression_reasons
+from hardstop.database.raw_item_repo import (
+    save_raw_item,
+    save_raw_item_with_action,
+    summarize_suppression_reasons,
+)
+from hardstop.database.run_raw_item_repo import list_run_raw_items, record_run_raw_item
 from hardstop.database.schema import Alert, Event, RawItem, SourceRun
 from hardstop.database.source_run_repo import create_source_run, get_all_source_health, list_recent_runs
 from hardstop.database.sqlite_client import session_context

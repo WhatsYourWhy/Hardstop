@@ -6,7 +6,8 @@ import hashlib
 import json
 from typing import Any, Dict, Iterable, List, Sequence
 
-from hardstop.database.schema import SourceRun
+from hardstop.database.run_raw_item_repo import list_run_raw_items
+from hardstop.database.schema import RunRawItem, SourceRun
 from hardstop.database.sqlite_client import session_context
 
 
@@ -87,14 +88,54 @@ def compute_source_runs_digest(sqlite_path: str, run_group_id: str, phase: str) 
     return _digest_from_snapshots(snapshots, include_fields=include_fields)
 
 
+def _load_run_raw_item_snapshots(sqlite_path: str, run_group_id: str) -> List[Dict[str, Any]]:
+    """Load run_raw_items lineage rows, normalized to primitive dicts."""
+    try:
+        with session_context(sqlite_path) as session:
+            rows: List[RunRawItem] = list_run_raw_items(session, run_group_id)
+    except Exception:
+        # Pre-v1.3 database, or the table is otherwise unreadable. Callers fall
+        # back to the legacy counts digest.
+        return []
+
+    return [
+        {
+            "source_id": row.source_id,
+            "content_hash": row.content_hash or "",
+        }
+        for row in rows
+    ]
+
+
 def compute_raw_item_batch_digest(sqlite_path: str, run_group_id: str) -> str:
     """
-    Compute a digest for the logical raw-item batch associated with a run group.
+    Compute a digest for the raw-item batch associated with a run group.
 
-    We approximate the batch content by hashing the FETCH SourceRun metrics
-    (source IDs, item counts, and diagnostics) which are recorded during fetch.
+    Hashes the per-item rows recorded in ``run_raw_items`` during fetch, so the
+    digest tracks actual item content: changing one raw item's content_hash
+    changes the batch digest.
+
+    ``raw_id`` is deliberately excluded. It embeds a fetch date and a random
+    suffix, so including it would make the digest unique per run even for
+    byte-identical content. ``fetch_action`` is likewise excluded so that
+    refetching identical content yields the same digest -- this identifies the
+    batch, not what the run did to it. Both remain in the table for audit.
+
+    Fallback: when the run group has no lineage rows -- pre-v1.3 databases, run
+    groups written before this release, and ``hardstop sources test`` (which
+    does not record lineage) -- the legacy FETCH SourceRun counts digest is
+    returned unchanged. The fallback keys off row count rather than table
+    existence, because every session runs ``create_all`` and would therefore
+    materialize an empty ``run_raw_items`` on any database.
     """
-    snapshots = _load_source_run_snapshots(sqlite_path, run_group_id, phase="FETCH")
+    snapshots = _load_run_raw_item_snapshots(sqlite_path, run_group_id)
+    if snapshots:
+        snapshots.sort(key=lambda item: (item["source_id"], item["content_hash"]))
+        return _digest_from_snapshots(
+            snapshots, include_fields=("source_id", "content_hash")
+        )
+
+    legacy_snapshots = _load_source_run_snapshots(sqlite_path, run_group_id, phase="FETCH")
     include_fields = (
         "source_id",
         "status",
@@ -103,7 +144,7 @@ def compute_raw_item_batch_digest(sqlite_path: str, run_group_id: str) -> str:
         "items_new",
         "diagnostics",
     )
-    return _digest_from_snapshots(snapshots, include_fields=include_fields)
+    return _digest_from_snapshots(legacy_snapshots, include_fields=include_fields)
 
 
 __all__ = ["compute_raw_item_batch_digest", "compute_source_runs_digest"]

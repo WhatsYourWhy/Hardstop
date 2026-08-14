@@ -77,15 +77,12 @@ def cmd_incidents_replay(args: argparse.Namespace) -> dict:
             logger.warning(message)
         else:
             _, artifact_path, artifact_payload = matches[0]
-            from hardstop.ops.run_record import artifact_hash as _artifact_hash
+            from hardstop.output.incidents.evidence import verify_artifact_payload
 
-            artifact_hash_value = artifact_payload.get("artifact_hash") or _artifact_hash(
-                {k: v for k, v in artifact_payload.items() if k != "artifact_hash"}
-            )
-            expected_hash = _artifact_hash({k: v for k, v in artifact_payload.items() if k != "artifact_hash"})
-            if artifact_hash_value != expected_hash:
+            expected_hash, stored_hash, matches_hash = verify_artifact_payload(artifact_payload)
+            if not matches_hash:
                 message = (
-                    f"Artifact hash mismatch for {incident_id}: stored={artifact_hash_value} expected={expected_hash}"
+                    f"Artifact hash mismatch for {incident_id}: stored={stored_hash} expected={expected_hash}"
                 )
                 diag = Diagnostic(code="INCIDENT_ARTIFACT_MISMATCH", message=message)
                 if mode == "strict":
@@ -94,6 +91,7 @@ def cmd_incidents_replay(args: argparse.Namespace) -> dict:
                 warnings.append(diag)
                 logger.warning(message)
             artifact_payload["artifact_hash"] = expected_hash
+            artifact_hash_value = expected_hash
 
             bytes_len = len(json.dumps(artifact_payload, sort_keys=True).encode("utf-8"))
             incident_ref = ArtifactRef(

@@ -157,6 +157,30 @@ class SourceRun(Base):
     )
 
 
+class RunRawItem(Base):
+    """
+    v1.3 lineage: which raw items a run group actually touched.
+
+    The composite primary key is first-wins per run group. Duplicate candidates
+    seen inside a single fetch are already accounted for by the
+    ``dedupe_dropped`` diagnostic on the FETCH SourceRun, so they must not
+    produce a second lineage row.
+    """
+
+    __tablename__ = "run_raw_items"
+
+    run_group_id = Column(String, primary_key=True)
+    raw_id = Column(String, primary_key=True)
+    source_id = Column(String, nullable=False, index=True)
+    content_hash = Column(String, nullable=True, index=True)
+    fetch_action = Column(String, nullable=False)  # NEW | DUPLICATE | RETRY
+    recorded_at_utc = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index('idx_run_raw_items_run_group_source', 'run_group_id', 'source_id'),
+    )
+
+
 def create_all(engine_url: str) -> None:
     engine = create_engine(engine_url)
     Base.metadata.create_all(engine)

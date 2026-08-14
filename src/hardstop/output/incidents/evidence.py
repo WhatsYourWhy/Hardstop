@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from hardstop.ops.run_record import artifact_hash, canonical_dumps
+from hardstop.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _as_list(value: Iterable[str] | None) -> List[str]:
@@ -306,14 +309,59 @@ def _load_artifact_file(path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
+class IncidentArtifactMismatchError(ValueError):
+    """A stored artifact_hash does not match the payload it claims to cover."""
+
+
+def verify_artifact_payload(payload: Dict[str, Any]) -> Tuple[str, Optional[str], bool]:
+    """
+    Recompute an incident artifact's hash and compare it to the stored value.
+
+    The single implementation of this check (v1.3). ``cmd_incidents_replay``
+    verified artifacts this way, but the brief read path recomputed the hash
+    and then used it only as a fallback for a missing value, so a tampered or
+    stale ``artifact_hash`` was trusted silently.
+
+    A payload with no stored hash counts as matching: hash-less artifacts are
+    legitimate (the value is inserted on write), and there is nothing to
+    contradict.
+
+    Args:
+        payload: The artifact payload, as loaded from disk
+
+    Returns:
+        (expected_hash, stored_hash, matches)
+    """
+    expected = artifact_hash({k: v for k, v in payload.items() if k != "artifact_hash"})
+    stored = payload.get("artifact_hash")
+    return expected, stored, (stored is None or stored == expected)
+
+
 def load_incident_evidence_summary(
     alert_id: str,
     correlation_key: str,
     *,
     dest_dir: str | Path = "output/incidents",
+    strict: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Load the latest incident evidence summary for an alert/correlation key pair.
+
+    The stored ``artifact_hash`` is verified against the payload (v1.3). On
+    mismatch, strict mode raises and best-effort mode warns and flags the
+    payload with ``artifact_hash_verified``/``artifact_hash_expected``.
+
+    Those flags are added only on mismatch, so a verified summary is byte-for-
+    byte what pre-v1.3 callers received and brief.v1 payloads are unchanged.
+
+    Args:
+        alert_id: Alert the artifact belongs to
+        correlation_key: Correlation key the artifact belongs to
+        dest_dir: Directory holding incident artifacts
+        strict: Raise on hash mismatch instead of warning
+
+    Raises:
+        IncidentArtifactMismatchError: strict mode, on hash mismatch
     """
     dest_dir = Path(dest_dir)
     if not dest_dir.exists():
@@ -336,13 +384,28 @@ def load_incident_evidence_summary(
 
     candidates.sort(key=lambda item: item[0], reverse=True)
     latest_payload = candidates[0][2]
-    recomputed_hash = artifact_hash({k: v for k, v in latest_payload.items() if k != "artifact_hash"})
-    latest_payload["artifact_hash"] = latest_payload.get("artifact_hash") or recomputed_hash
+
+    expected_hash, stored_hash, matches = verify_artifact_payload(latest_payload)
+    if not matches:
+        message = (
+            f"Artifact hash mismatch for {alert_id}: "
+            f"stored={stored_hash} expected={expected_hash}"
+        )
+        if strict:
+            raise IncidentArtifactMismatchError(message)
+        logger.warning(message)
+        latest_payload["artifact_hash_verified"] = False
+        latest_payload["artifact_hash_expected"] = expected_hash
+    else:
+        latest_payload["artifact_hash"] = stored_hash or expected_hash
+
     return latest_payload
 
 
 __all__ = [
+    "IncidentArtifactMismatchError",
     "IncidentEvidenceArtifact",
     "build_incident_evidence_artifact",
     "load_incident_evidence_summary",
+    "verify_artifact_payload",
 ]

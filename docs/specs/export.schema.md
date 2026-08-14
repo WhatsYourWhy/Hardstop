@@ -172,6 +172,7 @@ When `--out` is provided, the export API writes a sidecar manifest file named
   "exported_at_utc": "2025-01-01T00:00:00Z",
   "config_hash": "...",
   "export_data_hash": "...",
+  "export_content_hash": "...",
   "artifact_hashes": ["..."],
   "config_snapshot": {}
 }
@@ -180,5 +181,39 @@ When `--out` is provided, the export API writes a sidecar manifest file named
 - `config_hash`: Hash of the resolved config snapshot.
 - `export_data_hash`: Hash of the exported payload (JSON export) or the CSV manifest metadata,
   computed with `exported_at_utc` removed to keep deterministic manifests.
+- `export_content_hash` (v1.3): SHA-256 of the exact bytes written to `--out`.
+  Unlike `export_data_hash` this **includes** `exported_at_utc`, so it differs
+  between two otherwise identical exports. The two answer different questions:
+  `export_data_hash` proves two exports carry the same data; `export_content_hash`
+  proves a received file is the file that was exported. Absent for stdout exports,
+  which write no manifest.
 - `artifact_hashes`: Incident evidence artifact hashes referenced by alerts (if any).
+  Populated for `export alerts` and (since v1.3) `export brief`. Always empty for
+  `export sources`: sources health is derived counters computed at export time,
+  not a set of independently hashed documents, so any entry would be a hash of
+  the same bytes `export_data_hash` already covers. Use `export_content_hash` to
+  verify a sources export.
 - `config_snapshot`: Full resolved config snapshot for client-side verification.
+
+### CSV manifests (v1.3)
+
+For `export alerts --format csv`, the hashed manifest payload carries `columns`
+and `content_sha256` (SHA-256 of the CSV bytes), so `export_data_hash`
+transitively covers the CSV content while remaining timestamp-independent.
+Before v1.3 the CSV manifest hashed only `{schema_version, format, row_count}`
+plus a fresh timestamp: it changed on every run and was insensitive to the CSV's
+actual contents.
+
+### File encoding (v1.3)
+
+Export files are written with `newline=""`, so bytes on disk are exactly the
+UTF-8 encoding of the serialized payload with LF line endings on every platform.
+Before v1.3, JSON exports on Windows were CRLF-translated and therefore could not
+be verified against any hash of the payload.
+
+### Provenance (v1.3)
+
+`hardstop export` emits a RunRecord with operator `hardstop.export@1.0.0`,
+carrying a `RunGroup` and an `ExportFilter` input ref and an `Export` output ref
+whose hash is taken from the bytes on disk (or from stdout content when `--out`
+is omitted). With `--strict`, a RunRecord emission failure exits 2.
