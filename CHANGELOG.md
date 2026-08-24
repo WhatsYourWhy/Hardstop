@@ -27,6 +27,18 @@
   which was added in 3.11, so `import hardstop` raised `ImportError` on 3.10
   while `pyproject.toml` advertised `requires-python = ">=3.10"`. Replaced with
   the equivalent `timezone.utc`. Found by the new CI matrix on its first run.
+- **`pip` bumped to 26.2.1 in `requirements.lock.txt`**, clearing the first
+  real finding the scheduled audit has produced (`PYSEC-2026-3721` /
+  `CVE-2026-13346`, fixed upstream in 26.2). pip mishandled doubly-encoded
+  package URLs from an index, allowing files to be written to arbitrary paths
+  on disk even when installing wheels. Exploiting it requires a malicious
+  *index*, not merely a malicious package, and `pip` appears in the lock only
+  as a transitive dependency of `pip-api` and `pip-tools` under
+  `--allow-unsafe` — but `README.md` publishes the lock as an install path, so
+  the pin is the fix. Bumped in place rather than by rerunning `pip-compile`:
+  regenerating on Windows/3.14 rewrites the Linux/3.12 resolution the file
+  records and silently adds an unmarked, Windows-only `colorama` — the same
+  class of platform contamination as the hash repinning above.
 
 #### Added
 - `.gitattributes` normalizing tracked text files to LF. Required for any
