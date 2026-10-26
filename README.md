@@ -104,7 +104,9 @@ pytest
 
 ## License
 
-[Hardstop Business License (SBL-1.0)](LICENSE) — free for evaluation and personal use. Production use requires a commercial agreement with WhatsYourWhy, Inc. Dual-licenses to Apache 2.0 on January 1, 2029. See [docs/LICENSING.md](docs/LICENSING.md) for details.
+[Hardstop Business License (SBL-1.0)](LICENSE). Shank Strategy Ops LLC is HARDSTOP's licensor and commercial contracting entity. WhatsYourWhy is the developer/GitHub handle.
+
+Non-Commercial Use is permitted subject to the license. Commercial Use, as defined in the license, requires a separate written agreement with Shank Strategy Ops LLC. Section 2.2 permits limited production evaluation for up to three internal users solely to validate fit, load test, or evaluate functionality, provided no resulting data or insights are sold, bartered, or incorporated into a revenue-producing workflow. This version becomes available under Apache 2.0, in addition to SBL-1.0, on January 1, 2029. See [docs/LICENSING.md](docs/LICENSING.md) for details.
 
 ## Changelog
 
