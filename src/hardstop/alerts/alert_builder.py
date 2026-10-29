@@ -18,7 +18,10 @@ from .alert_models import (
 )
 from .correlation import build_correlation_key
 from .impact_scorer import calculate_network_impact_score, map_score_to_classification
-from ..output.incidents.evidence import build_incident_evidence_artifact
+from ..output.incidents.evidence import (
+    build_incident_evidence_artifact,
+    verify_artifact_payload,
+)
 from ..config.loader import load_alert_quality_config
 from ..database.alert_repo import (
     find_recent_alert_by_key,
@@ -600,7 +603,7 @@ def build_basic_alert(
                 source_id=source_id,  # v0.7: update source_id from latest event
                 trust_tier=trust_tier,  # v0.7: update trust_tier from latest event
             )
-            session.commit()
+            # Commit only after the incident evidence has been persisted and checked.
             
             # Use existing alert ID and add structured correlation info
             alert_id = existing_alert.alert_id
@@ -647,7 +650,7 @@ def build_basic_alert(
                 source_id=source_id,  # v0.7: store source_id for UI efficiency
                 trust_tier=trust_tier,  # v0.7: store trust_tier
             )
-            session.commit()
+            # Commit only after the incident evidence has been persisted and checked.
             
             if evidence:
                 evidence.correlation = {
@@ -685,18 +688,33 @@ def build_basic_alert(
                     "trust_tier": trust_tier,
                 }
 
-    incident_artifact, incident_ref, incident_path = build_incident_evidence_artifact(
-        alert_id=alert_id,
-        event=event,
-        correlation_key=correlation_key,
-        existing_alert=existing_alert,
-        window_hours=7 * 24,
-        dest_dir=incident_dest_dir,
-        generated_at=event.get("event_time_utc") or event.get("published_at_utc"),
-        filename_basename=f"{alert_id}__{event.get('event_id', 'event')}__{correlation_key.replace('|', '_')}",
-        determinism_mode=determinism_mode,
-        determinism_context=determinism_context if determinism_mode == "pinned" else None,
-    )
+    # Fail closed: do not commit an alert without evidence written to disk and
+    # verified against the reference hash. This is the first commit-boundary
+    # safeguard; DB-backed immutable evidence/versioning is a separate phase.
+    try:
+        incident_artifact, incident_ref, incident_path = build_incident_evidence_artifact(
+            alert_id=alert_id,
+            event=event,
+            correlation_key=correlation_key,
+            existing_alert=existing_alert,
+            window_hours=7 * 24,
+            dest_dir=incident_dest_dir,
+            generated_at=event.get("event_time_utc") or event.get("published_at_utc"),
+            filename_basename=f"{alert_id}__{event.get('event_id', 'event')}__{correlation_key.replace('|', '_')}",
+            determinism_mode=determinism_mode,
+            determinism_context=determinism_context if determinism_mode == "pinned" else None,
+        )
+        if session is not None:
+            stored_payload = json.loads(incident_path.read_text(encoding="utf-8"))
+            computed_hash, stored_hash, verified = verify_artifact_payload(stored_payload)
+            if not verified or stored_hash != incident_ref.hash or computed_hash != incident_ref.hash:
+                raise ValueError("Incident evidence failed verification before alert commit")
+            session.commit()
+    except Exception:
+        if session is not None:
+            session.rollback()
+        raise
+
     if evidence is None:
         evidence = AlertEvidence()
     evidence.incident_evidence = IncidentEvidenceSummary(
