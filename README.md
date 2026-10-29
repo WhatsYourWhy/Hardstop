@@ -12,6 +12,12 @@ Supply chain teams drown in alerts from dozens of sources. Hardstop filters the 
 
 ## Quick Start
 
+Use Python 3.11+ for the hashed environment below, which includes security tooling.
+The application itself still supports Python 3.10; on 3.10, install the runtime
+with `python -m pip install -e .` (or `-e ".[dev]"` for tests) instead of the
+combined tooling lockfile. Run audits in a separate Python 3.11+ environment with
+`python -m pip install -e ".[security]"`.
+
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
 pip install --require-hashes -r requirements.lock.txt
@@ -82,7 +88,7 @@ src/hardstop/
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.10+ for the application and tests; Python 3.11+ for security tooling
 - SQLite (bundled with Python)
 
 ## Tests
