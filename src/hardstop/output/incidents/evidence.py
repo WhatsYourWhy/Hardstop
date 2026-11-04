@@ -293,9 +293,10 @@ def build_incident_evidence_artifact(
     )
     artifact_path = dest_dir / f"{filename}.json"
     payload_text = canonical_dumps(payload)
-    # Write via a temp file in dest_dir, then atomically replace the final path
-    # so a partial write cannot leave a truncated *.json artifact behind.
-    # Keep the prefix short: sanitized basenames can already be near NAME_MAX.
+    # Stage to a temp file, verify its hash, then atomically replace the final
+    # path. A failed check deletes only the temp and never touches a pre-existing
+    # artifact at artifact_path. Keep the prefix short: sanitized basenames can
+    # already be near NAME_MAX.
     fd, tmp_name = tempfile.mkstemp(
         suffix=".json",
         prefix=".incident-",
@@ -304,6 +305,14 @@ def build_incident_evidence_artifact(
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
             tmp_file.write(payload_text)
+        stored_payload = json.loads(Path(tmp_name).read_text(encoding="utf-8"))
+        computed_hash, stored_hash, verified = verify_artifact_payload(stored_payload)
+        if (
+            not verified
+            or stored_hash != payload["artifact_hash"]
+            or computed_hash != payload["artifact_hash"]
+        ):
+            raise ValueError("Incident evidence failed verification before publish")
         os.replace(tmp_name, artifact_path)
     except Exception:
         try:
