@@ -5,25 +5,36 @@ Where Hardstop is, what is deliberately deferred, and what to pick up next.
 This file is the durable record of intent. If you are returning to the project
 cold, read this first, then `CHANGELOG.md` for what actually shipped.
 
-**Status:** v1.3 provenance hardening landed 2026-08-14 (PRs #104, #105).
-The supply-chain v1 core remains frozen: behavior changes to classification,
-impact score, scope, correlation, or suppression require a v1.x or v2 proposal.
+**Status:** Provenance hardening landed 2026-08-14 (PRs #104, #105; tracked as
+v1.3 work in `CHANGELOG.md`; package version remains 1.2.0). Fail-closed alert
+evidence before commit shipped in PRs #109 and #114. The supply-chain v1 core
+remains frozen: behavior changes to classification, impact score, scope,
+correlation, or suppression require a v1.x or v2 proposal.
+
+---
+
+## Shipped: fail-closed incident evidence (PRs #109, #114)
+
+Alerts no longer commit unless incident evidence is written and hash-verified.
+Evidence is staged to a temp file, verified, then renamed into place; alert
+row writes run inside a SAVEPOINT so an evidence failure rolls back only that
+alert write. Full DB-backed alert versioning and candidate tables remain below.
 
 ---
 
 ## Next up: alert commit, version, and dependency layer
 
-**The single highest-value change, and the reason v1.3 was scoped the way it
-was.** v1.3 made inputs and outputs traceable. This makes the *decision* itself
-transactional.
+**The single highest-value remaining change after provenance hardening.**
+Provenance made inputs and outputs traceable; fail-closed evidence closed the
+filesystem gap for the alert write. This next layer makes the *decision*
+itself versioned and transactional.
 
 ### The problem
 
-`build_basic_alert()` in `src/hardstop/alerts/alert_builder.py` does three
-different jobs in one function: it constructs the alert, applies quality caps
-and correlation, and writes and commits the database row (`session.commit()` at
-the create and update branches). There is no verification boundary between
-calculation and authoritative persistence.
+`build_basic_alert()` in `src/hardstop/alerts/alert_builder.py` still does
+several jobs in one function: it constructs the alert, applies quality caps
+and correlation, and persists the database row. There is no candidate /
+version boundary between calculation and authoritative persistence.
 
 Consequences today:
 
@@ -34,8 +45,6 @@ Consequences today:
 - `Alert.status` (`OPEN` / `UPDATED`) is a lifecycle state, not a commit state.
   There is no `PROPOSED` / `VERIFIED` / `REVIEW_REQUIRED` / `BLOCKED` /
   `COMMITTED` / `INVALIDATED` / `SUPERSEDED`.
-- Incident evidence is written to disk *after* the database commit, so a
-  filesystem failure can leave a committed alert with no evidence artifact.
 
 ### The shape
 
@@ -47,13 +56,13 @@ Consequences today:
 2. Add immutable `alert_versions`, plus `alert_candidates`,
    `verification_verdicts` and `artifact_dependencies`. The existing `alerts`
    table stays as the current-state projection, for API compatibility.
-3. Build the canonical IncidentEvidence payload in memory, hash it, store it
-   *inside* the same transaction as the alert version, and write
-   `output/incidents/*.json` afterwards as a derived artifact that can be
-   regenerated from the stored payload.
+3. Store the canonical IncidentEvidence payload *inside* the same transaction
+   as the alert version, with `output/incidents/*.json` as a derived artifact
+   that can be regenerated from the stored payload. (Filesystem fail-closed
+   write + verify-before-rename already shipped in #109/#114.)
 
 Use the existing additive migration pattern in `database/migrate.py` (see
-`ensure_run_raw_items_table` for the v1.3 example), and keep the existing
+`ensure_run_raw_items_table` for the provenance example), and keep the existing
 `config_hash` rather than introducing a separate policy hash.
 
 ### Acceptance test
@@ -76,7 +85,7 @@ artifact hashes.
 
 ---
 
-## Known limitations from v1.3
+## Known limitations from provenance hardening
 
 Each of these was a deliberate scope decision, not an oversight.
 
@@ -95,7 +104,8 @@ Real but low-urgency. Fold into adjacent work rather than scheduling.
   declared in `schema.py` either.
 - **`create_all` on every session.** `get_session()` / `session_context()` each
   construct a new engine and re-run `Base.metadata.create_all`. This is also why
-  the v1.3 batch-digest fallback keys off row count rather than table existence.
+  the provenance batch-digest fallback keys off row count rather than table
+  existence.
 - **Silent provenance downgrade.** `_safe_raw_batch_hash` and
   `_safe_source_runs_hash` in `cli/_helpers.py` fall back to a count-only hash
   on any exception, logged at `debug`. Raising that to `warning` is a one-line

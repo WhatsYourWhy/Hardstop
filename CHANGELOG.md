@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Alert evidence commit boundary
+
+#### Fixed
+- Alerts fail closed on evidence: an alert is not committed unless its incident
+  evidence artifact is written and hash-verified (PRs #109, #114). Alert row
+  writes use a SAVEPOINT so an evidence failure rolls back only that write;
+  evidence is staged to a temp file and verified before rename.
+
 ### Build and test infrastructure
 
 #### Fixed
