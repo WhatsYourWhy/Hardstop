@@ -1,6 +1,6 @@
 # Hardstop Licensing and Commercial Terms
 
-_Last updated: October 26, 2026_
+_Last updated: November 4, 2026_
 
 ## Legal entity and developer handle
 
@@ -33,34 +33,3 @@ rights.
 | Warranty, liability, and termination | Sections 7-9 contain the existing disclaimer, liability limitation, and automatic termination terms. Sections 5-9 survive termination. |
 | Future Apache availability | Section 10 makes this version of the Licensed Work available under Apache License 2.0, in addition to SBL-1.0, on January 1, 2029. |
 | Governing law | Section 11 retains Delaware law, excluding its conflicts of law rules. |
-
-## Commercial packaging baseline
-
-The October 26, 2026 commercial packaging state records Gate 9
-(Licensing & Commercial Terms) as **Pass**, with Shank Strategy Ops LLC as
-the entity and WhatsYourWhy as the handle. It identifies
-`SSO-HS-GATE09-v1.0`
-(`hardstop_gate_09_licensing_and_pilot_agreement.md`) as the approved
-licensing and 30-day bounded pilot agreement artifact.
-
-The current product baseline is local-first Python/SQLite, with no
-multi-tenant/SaaS features or GUI. Earlier suggestions on this page about
-hosted SaaS, premium modules, alternative license families, and future
-pricing were strategy options. They do not define the current product or
-grant rights.
-
-Pilot scope, fees, support obligations, and any rights beyond SBL-1.0 must be
-set out in a separate written agreement with Shank Strategy Ops LLC. This
-public summary does not reproduce or replace the approved pilot agreement.
-
-## October 26 reconciliation
-
-The repository correction aligns the Company definition, README, this page,
-and the licensing contact with the approved entity. The operative LICENSE
-changes only the entity name in Section 1.1; all other license text is
-unchanged, including its version/date, copyright notice, usage restrictions,
-and Change Date.
-
-See the [entity audit](audits/2026-10-26-licensing-entity-audit.md) for the
-source, complete conflict inventory, verification limits, and terms referred
-for professional legal review.
