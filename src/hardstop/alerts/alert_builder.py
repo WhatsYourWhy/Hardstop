@@ -18,10 +18,7 @@ from .alert_models import (
 )
 from .correlation import build_correlation_key
 from .impact_scorer import calculate_network_impact_score, map_score_to_classification
-from ..output.incidents.evidence import (
-    build_incident_evidence_artifact,
-    verify_artifact_payload,
-)
+from ..output.incidents.evidence import build_incident_evidence_artifact
 from ..config.loader import load_alert_quality_config
 from ..database.alert_repo import (
     find_recent_alert_by_key,
@@ -566,13 +563,28 @@ def build_basic_alert(
     correlation_key = build_correlation_key(event)
     existing_alert = None
     first_seen_utc = _resolve_first_seen_utc(event, session)
-    
-    # Correlation persistence: only when session is available
-    # Note: Correlation key is always computed for debugging/replay,
-    # but persistence and deduplication require database session
-    if session is not None:
-        existing_alert = find_recent_alert_by_key(session, correlation_key, within_days=7)
-        
+
+    def _attach_correlation_evidence(*, action: Optional[str], correlated_alert_id: Optional[str]) -> None:
+        if not evidence:
+            return
+        evidence.correlation = {
+            "key": correlation_key,
+            "action": action,
+            "alert_id": correlated_alert_id,
+        }
+        # Add source metadata if available (v0.7: includes trust_tier)
+        if event.get("source_id"):
+            evidence.source = {
+                "id": event.get("source_id"),
+                "tier": event.get("tier"),
+                "raw_id": event.get("raw_id"),
+                "url": event.get("url"),
+                "trust_tier": trust_tier,
+            }
+
+    def _persist_alert_row() -> None:
+        """Apply create/update to the session (caller owns the SAVEPOINT)."""
+        nonlocal alert_id, scope, scope_payload, scope_json, diagnostics_payload
         if existing_alert:
             # Update existing alert (v0.7: store tier/source_id/trust_tier from latest event)
             merged_scope_payload = _merge_scope(existing_alert.scope_json, scope_payload)
@@ -587,7 +599,7 @@ def build_basic_alert(
                     diagnostics_payload,
                     scope_payload,
                 )
-            
+
             update_existing_alert_row(
                 session,
                 existing_alert,
@@ -603,33 +615,16 @@ def build_basic_alert(
                 source_id=source_id,  # v0.7: update source_id from latest event
                 trust_tier=trust_tier,  # v0.7: update trust_tier from latest event
             )
-            # Commit only after the incident evidence has been persisted and checked.
-            
-            # Use existing alert ID and add structured correlation info
             alert_id = existing_alert.alert_id
+            _attach_correlation_evidence(action="UPDATED", correlated_alert_id=existing_alert.alert_id)
             if evidence:
-                evidence.correlation = {
-                    "key": correlation_key,
-                    "action": "UPDATED",
-                    "alert_id": existing_alert.alert_id,
-                }
-                # Add source metadata if available (v0.7: includes trust_tier)
-                if event.get("source_id"):
-                    evidence.source = {
-                        "id": event.get("source_id"),
-                        "tier": event.get("tier"),
-                        "raw_id": event.get("raw_id"),
-                        "url": event.get("url"),
-                        "trust_tier": trust_tier,
-                    }
                 evidence.linking_notes = (evidence.linking_notes or []) + [
                     f"Correlated to existing alert_id={existing_alert.alert_id} via key={correlation_key}"
                 ]
         else:
-            # Create new alert
             reasoning_text = "\n".join(reasoning) if reasoning else None
             actions_text = json.dumps([a.model_dump() for a in recommended_actions]) if recommended_actions else None
-            
+
             upsert_new_alert_row(
                 session,
                 alert_id=alert_id,
@@ -650,49 +645,16 @@ def build_basic_alert(
                 source_id=source_id,  # v0.7: store source_id for UI efficiency
                 trust_tier=trust_tier,  # v0.7: store trust_tier
             )
-            # Commit only after the incident evidence has been persisted and checked.
-            
+            _attach_correlation_evidence(action="CREATED", correlated_alert_id=alert_id)
             if evidence:
-                evidence.correlation = {
-                    "key": correlation_key,
-                    "action": "CREATED",
-                    "alert_id": alert_id,
-                }
-                # Add source metadata if available (v0.7: includes trust_tier)
-                if event.get("source_id"):
-                    evidence.source = {
-                        "id": event.get("source_id"),
-                        "tier": event.get("tier"),
-                        "raw_id": event.get("raw_id"),
-                        "url": event.get("url"),
-                        "trust_tier": trust_tier,
-                    }
                 evidence.linking_notes = (evidence.linking_notes or []) + [
                     f"Created new correlated alert via key={correlation_key}"
                 ]
-    else:
-        # No session: still include key in evidence for debugging/replay
-        if evidence:
-            evidence.correlation = {
-                "key": correlation_key,
-                "action": None,  # Not persisted
-                "alert_id": None,
-            }
-            # Add source metadata if available (v0.7: includes trust_tier)
-            if event.get("source_id"):
-                evidence.source = {
-                    "id": event.get("source_id"),
-                    "tier": event.get("tier"),
-                    "raw_id": event.get("raw_id"),
-                    "url": event.get("url"),
-                    "trust_tier": trust_tier,
-                }
 
-    # Fail closed: do not commit an alert without evidence written to disk and
-    # verified against the reference hash. This is the first commit-boundary
-    # safeguard; DB-backed immutable evidence/versioning is a separate phase.
-    try:
-        incident_artifact, incident_ref, incident_path = build_incident_evidence_artifact(
+    def _build_evidence():
+        # Fail closed: hash is checked on the temp file before it replaces any
+        # existing artifact. DB-backed immutable evidence/versioning is separate.
+        return build_incident_evidence_artifact(
             alert_id=alert_id,
             event=event,
             correlation_key=correlation_key,
@@ -704,16 +666,26 @@ def build_basic_alert(
             determinism_mode=determinism_mode,
             determinism_context=determinism_context if determinism_mode == "pinned" else None,
         )
-        if session is not None:
-            stored_payload = json.loads(incident_path.read_text(encoding="utf-8"))
-            computed_hash, stored_hash, verified = verify_artifact_payload(stored_payload)
-            if not verified or stored_hash != incident_ref.hash or computed_hash != incident_ref.hash:
-                raise ValueError("Incident evidence failed verification before alert commit")
-            session.commit()
-    except Exception:
-        if session is not None:
-            session.rollback()
-        raise
+
+    # Correlation persistence: only when session is available
+    # Note: Correlation key is always computed for debugging/replay,
+    # but persistence and deduplication require database session.
+    # Isolate this function's alert write in a SAVEPOINT so an evidence failure
+    # rolls back only those changes, not the caller's other pending work.
+    # session.flush() first pushes caller-staged rows into the outer transaction;
+    # flush errors from those pending changes therefore surface here.
+    if session is not None:
+        existing_alert = find_recent_alert_by_key(session, correlation_key, within_days=7)
+        session.flush()
+        with session.begin_nested():
+            _persist_alert_row()
+            # Commit only after incident evidence has been persisted and checked.
+            incident_artifact, incident_ref, incident_path = _build_evidence()
+        session.commit()
+    else:
+        # No session: still include key in evidence for debugging/replay
+        _attach_correlation_evidence(action=None, correlated_alert_id=None)
+        incident_artifact, incident_ref, incident_path = _build_evidence()
 
     if evidence is None:
         evidence = AlertEvidence()

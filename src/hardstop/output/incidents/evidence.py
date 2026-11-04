@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -290,14 +292,41 @@ def build_incident_evidence_artifact(
         or f"{alert_id}__{event.get('event_id', 'event')}__{correlation_key.replace('|', '_')}"
     )
     artifact_path = dest_dir / f"{filename}.json"
-    artifact_path.write_text(canonical_dumps(payload), encoding="utf-8")
+    payload_text = canonical_dumps(payload)
+    # Stage to a temp file, verify its hash, then atomically replace the final
+    # path. A failed check deletes only the temp and never touches a pre-existing
+    # artifact at artifact_path. Keep the prefix short: sanitized basenames can
+    # already be near NAME_MAX.
+    fd, tmp_name = tempfile.mkstemp(
+        suffix=".json",
+        prefix=".incident-",
+        dir=dest_dir,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(payload_text)
+        stored_payload = json.loads(Path(tmp_name).read_text(encoding="utf-8"))
+        computed_hash, stored_hash, verified = verify_artifact_payload(stored_payload)
+        if (
+            not verified
+            or stored_hash != payload["artifact_hash"]
+            or computed_hash != payload["artifact_hash"]
+        ):
+            raise ValueError("Incident evidence failed verification before publish")
+        os.replace(tmp_name, artifact_path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
     artifact_ref = ArtifactRef(
         id=f"incident-evidence:{alert_id}",
         hash=payload["artifact_hash"],
         kind="IncidentEvidence",
         schema="incident-evidence/v1",
-        bytes=len(canonical_dumps(payload).encode("utf-8")),
+        bytes=len(payload_text.encode("utf-8")),
     )
     return artifact, artifact_ref, artifact_path
 

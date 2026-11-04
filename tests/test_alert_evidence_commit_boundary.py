@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import select
 
 from hardstop.alerts.alert_builder import build_basic_alert
-from hardstop.database.schema import Alert
+from hardstop.database.schema import Alert, Event
 
 
 def _event(event_id="EVT-COMMIT-1"):
@@ -47,7 +47,7 @@ def test_evidence_write_failure_does_not_commit_new_alert(session, tmp_path):
 
 def test_evidence_hash_mismatch_does_not_commit_new_alert(session, tmp_path):
     with patch(
-        "hardstop.alerts.alert_builder.verify_artifact_payload",
+        "hardstop.output.incidents.evidence.verify_artifact_payload",
         return_value=("incorrect", "incorrect", False),
     ), pytest.raises(ValueError, match="failed verification"):
         build_basic_alert(_event(), session=session, incident_dest_dir=tmp_path)
@@ -91,3 +91,88 @@ def test_failed_evidence_write_preserves_existing_alert(session, tmp_path):
     assert row.alert_id == initial.alert_id
     assert row.update_count == original_count
     assert row.summary == original_summary
+
+
+def test_evidence_failure_preserves_caller_pending_session_changes(session, tmp_path):
+    """SAVEPOINT rollback must not discard unrelated pending caller work."""
+    pending = Event(
+        event_id="EVT-CALLER-PENDING",
+        source_type="test",
+        title="unrelated caller change",
+    )
+    session.add(pending)
+
+    with patch(
+        "hardstop.output.incidents.evidence.verify_artifact_payload",
+        return_value=("incorrect", "incorrect", False),
+    ), pytest.raises(ValueError, match="failed verification"):
+        build_basic_alert(_event(), session=session, incident_dest_dir=tmp_path)
+
+    assert _alerts(session) == []
+    # Autoflush may have moved the row out of session.new into the outer
+    # transaction; it must still be present and commitable.
+    assert session.get(Event, "EVT-CALLER-PENDING") is pending
+
+    session.commit()
+    assert session.get(Event, "EVT-CALLER-PENDING") is not None
+    assert _alerts(session) == []
+
+
+def test_hash_mismatch_does_not_leave_evidence_file(session, tmp_path):
+    with patch(
+        "hardstop.output.incidents.evidence.verify_artifact_payload",
+        return_value=("incorrect", "incorrect", False),
+    ), pytest.raises(ValueError, match="failed verification"):
+        build_basic_alert(_event(), session=session, incident_dest_dir=tmp_path)
+
+    assert list(tmp_path.glob("*.json")) == []
+    assert list(tmp_path.glob(".incident-*.json")) == []
+    assert _alerts(session) == []
+
+
+def test_hash_mismatch_preserves_preexisting_evidence_bytes(session, tmp_path):
+    """Failed verification must not replace an existing same-name evidence file."""
+    initial = build_basic_alert(_event(), session=session, incident_dest_dir=tmp_path)
+    artifacts = list(tmp_path.glob("*.json"))
+    assert len(artifacts) == 1
+    original_path = artifacts[0]
+    original_bytes = original_path.read_bytes()
+
+    with patch(
+        "hardstop.output.incidents.evidence.verify_artifact_payload",
+        return_value=("incorrect", "incorrect", False),
+    ), pytest.raises(ValueError, match="failed verification"):
+        # Same event_id/correlation key → same artifact basename as the first write.
+        build_basic_alert(
+            {**_event(), "title": "Revised warehouse closure"},
+            session=session,
+            incident_dest_dir=tmp_path,
+        )
+
+    assert original_path.read_bytes() == original_bytes
+    assert list(tmp_path.glob(".incident-*.json")) == []
+    session.expire_all()
+    row = _alerts(session)[0]
+    assert row.alert_id == initial.alert_id
+    assert row.summary == initial.summary
+
+
+def test_exception_after_alert_write_closes_savepoint(session, tmp_path):
+    """Nested SAVEPOINT must close even when evidence fails after the alert write."""
+    with patch(
+        "hardstop.alerts.alert_builder.build_incident_evidence_artifact",
+        side_effect=RuntimeError("boom after upsert"),
+    ), pytest.raises(RuntimeError, match="boom after upsert"):
+        build_basic_alert(_event(), session=session, incident_dest_dir=tmp_path)
+
+    assert _alerts(session) == []
+
+    # A leaked SAVEPOINT would break later work on this session.
+    pending = Event(
+        event_id="EVT-AFTER-SAVEPOINT",
+        source_type="test",
+        title="session still usable",
+    )
+    session.add(pending)
+    session.commit()
+    assert session.get(Event, "EVT-AFTER-SAVEPOINT") is not None
