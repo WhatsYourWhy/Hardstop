@@ -566,110 +566,120 @@ def build_basic_alert(
     correlation_key = build_correlation_key(event)
     existing_alert = None
     first_seen_utc = _resolve_first_seen_utc(event, session)
+    # Isolate this function's alert upsert/update in a SAVEPOINT so an evidence
+    # failure rolls back only those changes, not the caller's other pending work.
+    alert_savepoint = None
     
     # Correlation persistence: only when session is available
     # Note: Correlation key is always computed for debugging/replay,
     # but persistence and deduplication require database session
     if session is not None:
         existing_alert = find_recent_alert_by_key(session, correlation_key, within_days=7)
-        
-        if existing_alert:
-            # Update existing alert (v0.7: store tier/source_id/trust_tier from latest event)
-            merged_scope_payload = _merge_scope(existing_alert.scope_json, scope_payload)
-            scope.facilities = merged_scope_payload.get("facilities", scope.facilities)
-            scope.lanes = merged_scope_payload.get("lanes", scope.lanes)
-            scope.shipments = merged_scope_payload.get("shipments", scope.shipments)
-            scope_payload = merged_scope_payload
-            scope_json = json.dumps(scope_payload)
-            if diagnostics_payload:
-                diagnostics_payload = _merge_diagnostics(
-                    existing_alert.diagnostics_json,
-                    diagnostics_payload,
-                    scope_payload,
+        # Flush caller-staged work into the outer transaction first so the
+        # SAVEPOINT only covers this function's alert upsert/update.
+        session.flush()
+        alert_savepoint = session.begin_nested()
+        try:
+            if existing_alert:
+                # Update existing alert (v0.7: store tier/source_id/trust_tier from latest event)
+                merged_scope_payload = _merge_scope(existing_alert.scope_json, scope_payload)
+                scope.facilities = merged_scope_payload.get("facilities", scope.facilities)
+                scope.lanes = merged_scope_payload.get("lanes", scope.lanes)
+                scope.shipments = merged_scope_payload.get("shipments", scope.shipments)
+                scope_payload = merged_scope_payload
+                scope_json = json.dumps(scope_payload)
+                if diagnostics_payload:
+                    diagnostics_payload = _merge_diagnostics(
+                        existing_alert.diagnostics_json,
+                        diagnostics_payload,
+                        scope_payload,
+                    )
+                
+                update_existing_alert_row(
+                    session,
+                    existing_alert,
+                    new_summary=summary,
+                    new_classification=classification,
+                    root_event_id=root_event_id,
+                    correlation_action="UPDATED",
+                    impact_score=impact_score if session else None,
+                    scope_json=scope_json,  # Update scope with latest event data
+                    diagnostics_json=json.dumps(diagnostics_payload, default=str) if diagnostics_payload else None,
+                    first_seen_utc=first_seen_utc,
+                    tier=tier,  # v0.7: update tier from latest event
+                    source_id=source_id,  # v0.7: update source_id from latest event
+                    trust_tier=trust_tier,  # v0.7: update trust_tier from latest event
                 )
-            
-            update_existing_alert_row(
-                session,
-                existing_alert,
-                new_summary=summary,
-                new_classification=classification,
-                root_event_id=root_event_id,
-                correlation_action="UPDATED",
-                impact_score=impact_score if session else None,
-                scope_json=scope_json,  # Update scope with latest event data
-                diagnostics_json=json.dumps(diagnostics_payload, default=str) if diagnostics_payload else None,
-                first_seen_utc=first_seen_utc,
-                tier=tier,  # v0.7: update tier from latest event
-                source_id=source_id,  # v0.7: update source_id from latest event
-                trust_tier=trust_tier,  # v0.7: update trust_tier from latest event
-            )
-            # Commit only after the incident evidence has been persisted and checked.
-            
-            # Use existing alert ID and add structured correlation info
-            alert_id = existing_alert.alert_id
-            if evidence:
-                evidence.correlation = {
-                    "key": correlation_key,
-                    "action": "UPDATED",
-                    "alert_id": existing_alert.alert_id,
-                }
-                # Add source metadata if available (v0.7: includes trust_tier)
-                if event.get("source_id"):
-                    evidence.source = {
-                        "id": event.get("source_id"),
-                        "tier": event.get("tier"),
-                        "raw_id": event.get("raw_id"),
-                        "url": event.get("url"),
-                        "trust_tier": trust_tier,
+                # Commit only after the incident evidence has been persisted and checked.
+                
+                # Use existing alert ID and add structured correlation info
+                alert_id = existing_alert.alert_id
+                if evidence:
+                    evidence.correlation = {
+                        "key": correlation_key,
+                        "action": "UPDATED",
+                        "alert_id": existing_alert.alert_id,
                     }
-                evidence.linking_notes = (evidence.linking_notes or []) + [
-                    f"Correlated to existing alert_id={existing_alert.alert_id} via key={correlation_key}"
-                ]
-        else:
-            # Create new alert
-            reasoning_text = "\n".join(reasoning) if reasoning else None
-            actions_text = json.dumps([a.model_dump() for a in recommended_actions]) if recommended_actions else None
-            
-            upsert_new_alert_row(
-                session,
-                alert_id=alert_id,
-                summary=summary,
-                risk_type=risk_type,
-                classification=classification,
-                status="OPEN",
-                reasoning=reasoning_text,
-                recommended_actions=actions_text,
-                root_event_id=root_event_id,
-                correlation_key=correlation_key,
-                correlation_action="CREATED",
-                impact_score=impact_score if session else None,
-                scope_json=scope_json,
-                diagnostics_json=json.dumps(diagnostics_payload, default=str) if diagnostics_payload else None,
-                first_seen_utc=first_seen_utc,
-                tier=tier,  # v0.7: store tier for brief efficiency
-                source_id=source_id,  # v0.7: store source_id for UI efficiency
-                trust_tier=trust_tier,  # v0.7: store trust_tier
-            )
-            # Commit only after the incident evidence has been persisted and checked.
-            
-            if evidence:
-                evidence.correlation = {
-                    "key": correlation_key,
-                    "action": "CREATED",
-                    "alert_id": alert_id,
-                }
-                # Add source metadata if available (v0.7: includes trust_tier)
-                if event.get("source_id"):
-                    evidence.source = {
-                        "id": event.get("source_id"),
-                        "tier": event.get("tier"),
-                        "raw_id": event.get("raw_id"),
-                        "url": event.get("url"),
-                        "trust_tier": trust_tier,
+                    # Add source metadata if available (v0.7: includes trust_tier)
+                    if event.get("source_id"):
+                        evidence.source = {
+                            "id": event.get("source_id"),
+                            "tier": event.get("tier"),
+                            "raw_id": event.get("raw_id"),
+                            "url": event.get("url"),
+                            "trust_tier": trust_tier,
+                        }
+                    evidence.linking_notes = (evidence.linking_notes or []) + [
+                        f"Correlated to existing alert_id={existing_alert.alert_id} via key={correlation_key}"
+                    ]
+            else:
+                # Create new alert
+                reasoning_text = "\n".join(reasoning) if reasoning else None
+                actions_text = json.dumps([a.model_dump() for a in recommended_actions]) if recommended_actions else None
+                
+                upsert_new_alert_row(
+                    session,
+                    alert_id=alert_id,
+                    summary=summary,
+                    risk_type=risk_type,
+                    classification=classification,
+                    status="OPEN",
+                    reasoning=reasoning_text,
+                    recommended_actions=actions_text,
+                    root_event_id=root_event_id,
+                    correlation_key=correlation_key,
+                    correlation_action="CREATED",
+                    impact_score=impact_score if session else None,
+                    scope_json=scope_json,
+                    diagnostics_json=json.dumps(diagnostics_payload, default=str) if diagnostics_payload else None,
+                    first_seen_utc=first_seen_utc,
+                    tier=tier,  # v0.7: store tier for brief efficiency
+                    source_id=source_id,  # v0.7: store source_id for UI efficiency
+                    trust_tier=trust_tier,  # v0.7: store trust_tier
+                )
+                # Commit only after the incident evidence has been persisted and checked.
+                
+                if evidence:
+                    evidence.correlation = {
+                        "key": correlation_key,
+                        "action": "CREATED",
+                        "alert_id": alert_id,
                     }
-                evidence.linking_notes = (evidence.linking_notes or []) + [
-                    f"Created new correlated alert via key={correlation_key}"
-                ]
+                    # Add source metadata if available (v0.7: includes trust_tier)
+                    if event.get("source_id"):
+                        evidence.source = {
+                            "id": event.get("source_id"),
+                            "tier": event.get("tier"),
+                            "raw_id": event.get("raw_id"),
+                            "url": event.get("url"),
+                            "trust_tier": trust_tier,
+                        }
+                    evidence.linking_notes = (evidence.linking_notes or []) + [
+                        f"Created new correlated alert via key={correlation_key}"
+                    ]
+        except Exception:
+            alert_savepoint.rollback()
+            raise
     else:
         # No session: still include key in evidence for debugging/replay
         if evidence:
@@ -691,6 +701,13 @@ def build_basic_alert(
     # Fail closed: do not commit an alert without evidence written to disk and
     # verified against the reference hash. This is the first commit-boundary
     # safeguard; DB-backed immutable evidence/versioning is a separate phase.
+    incident_dest = Path(incident_dest_dir)
+    pre_existing_artifacts = (
+        {path.resolve() for path in incident_dest.glob("*.json")}
+        if incident_dest.exists()
+        else set()
+    )
+    incident_path = None
     try:
         incident_artifact, incident_ref, incident_path = build_incident_evidence_artifact(
             alert_id=alert_id,
@@ -709,10 +726,21 @@ def build_basic_alert(
             computed_hash, stored_hash, verified = verify_artifact_payload(stored_payload)
             if not verified or stored_hash != incident_ref.hash or computed_hash != incident_ref.hash:
                 raise ValueError("Incident evidence failed verification before alert commit")
+            if alert_savepoint is not None:
+                alert_savepoint.commit()
+                alert_savepoint = None
             session.commit()
     except Exception:
-        if session is not None:
-            session.rollback()
+        if alert_savepoint is not None:
+            alert_savepoint.rollback()
+            alert_savepoint = None
+        # Remove only an evidence file this call created; leave pre-existing alone.
+        if incident_path is not None:
+            try:
+                if incident_path.resolve() not in pre_existing_artifacts:
+                    incident_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise
 
     if evidence is None:

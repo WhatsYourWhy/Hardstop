@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -290,14 +292,32 @@ def build_incident_evidence_artifact(
         or f"{alert_id}__{event.get('event_id', 'event')}__{correlation_key.replace('|', '_')}"
     )
     artifact_path = dest_dir / f"{filename}.json"
-    artifact_path.write_text(canonical_dumps(payload), encoding="utf-8")
+    payload_text = canonical_dumps(payload)
+    # Write via a temp file in dest_dir, then atomically replace the final path
+    # so a partial write cannot leave a truncated *.json artifact behind.
+    # Keep the prefix short: sanitized basenames can already be near NAME_MAX.
+    fd, tmp_name = tempfile.mkstemp(
+        suffix=".json",
+        prefix=".incident-",
+        dir=dest_dir,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(payload_text)
+        os.replace(tmp_name, artifact_path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
     artifact_ref = ArtifactRef(
         id=f"incident-evidence:{alert_id}",
         hash=payload["artifact_hash"],
         kind="IncidentEvidence",
         schema="incident-evidence/v1",
-        bytes=len(canonical_dumps(payload).encode("utf-8")),
+        bytes=len(payload_text.encode("utf-8")),
     )
     return artifact, artifact_ref, artifact_path
 

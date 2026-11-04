@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import select
 
 from hardstop.alerts.alert_builder import build_basic_alert
-from hardstop.database.schema import Alert
+from hardstop.database.schema import Alert, Event
 
 
 def _event(event_id="EVT-COMMIT-1"):
@@ -91,3 +91,39 @@ def test_failed_evidence_write_preserves_existing_alert(session, tmp_path):
     assert row.alert_id == initial.alert_id
     assert row.update_count == original_count
     assert row.summary == original_summary
+
+
+def test_evidence_failure_preserves_caller_pending_session_changes(session, tmp_path):
+    """SAVEPOINT rollback must not discard unrelated pending caller work."""
+    pending = Event(
+        event_id="EVT-CALLER-PENDING",
+        source_type="test",
+        title="unrelated caller change",
+    )
+    session.add(pending)
+
+    with patch(
+        "hardstop.alerts.alert_builder.verify_artifact_payload",
+        return_value=("incorrect", "incorrect", False),
+    ), pytest.raises(ValueError, match="failed verification"):
+        build_basic_alert(_event(), session=session, incident_dest_dir=tmp_path)
+
+    assert _alerts(session) == []
+    # Autoflush may have moved the row out of session.new into the outer
+    # transaction; it must still be present and commitable.
+    assert session.get(Event, "EVT-CALLER-PENDING") is pending
+
+    session.commit()
+    assert session.get(Event, "EVT-CALLER-PENDING") is not None
+    assert _alerts(session) == []
+
+
+def test_hash_mismatch_does_not_leave_evidence_file(session, tmp_path):
+    with patch(
+        "hardstop.alerts.alert_builder.verify_artifact_payload",
+        return_value=("incorrect", "incorrect", False),
+    ), pytest.raises(ValueError, match="failed verification"):
+        build_basic_alert(_event(), session=session, incident_dest_dir=tmp_path)
+
+    assert list(tmp_path.glob("*.json")) == []
+    assert _alerts(session) == []
