@@ -1,6 +1,6 @@
 # Hardstop Licensing and Commercial Terms
 
-_Last updated: October 26, 2026_
+_Last updated: November 4, 2026_
 
 ## Legal entity and developer handle
 
