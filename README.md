@@ -43,7 +43,7 @@ hardstop brief --today --since 24h
 | Command | What it does |
 |---------|-------------|
 | `hardstop init` | Initialize Hardstop configuration files from examples |
-| `hardstop doctor` | Run health checks on Hardstop system |
+| `hardstop doctor` | Health check (PATH, database, sources config, NWS connectivity, suppression, source health, last run group) |
 | `hardstop ingest` | Load network data from CSV files |
 | `hardstop fetch` | Fetch items from external sources |
 | `hardstop ingest-external` | Ingest external raw items into events and alerts |
