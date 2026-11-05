@@ -54,7 +54,7 @@ hardstop brief --today --since 24h
 | `hardstop sources test <id>` | Test a single source by fetching |
 | `hardstop incidents replay <id> [--strict] [--format json\|text]` | Replay an incident from artifacts |
 | `hardstop export brief` | Export brief data |
-| `hardstop export alerts [--tier] [--classification] --format csv` | Export alerts data |
+| `hardstop export alerts [--tier {global,regional,local}] [--classification {0,1,2}] --format csv` | Export alerts data |
 | `hardstop export sources` | Export sources health data |
 | `hardstop demo --mode pinned` | Run the demo pipeline |
 
