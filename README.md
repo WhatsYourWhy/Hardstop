@@ -42,13 +42,21 @@ hardstop brief --today --since 24h
 
 | Command | What it does |
 |---------|-------------|
-| `hardstop run --since 24h` | Fetch + ingest pipeline |
+| `hardstop init` | Initialize Hardstop configuration files from examples |
+| `hardstop doctor` | Health check (PATH, database, sources config, NWS connectivity, suppression, source health, last run group) |
+| `hardstop ingest` | Load network data from CSV files |
+| `hardstop fetch` | Fetch items from external sources |
+| `hardstop ingest-external` | Ingest external raw items into events and alerts |
+| `hardstop run --since 24h` | Run full pipeline: fetch → ingest → brief |
 | `hardstop brief --today` | Generate daily brief |
-| `hardstop doctor` | Health check (PATH, DB, configs, sources) |
-| `hardstop sources health` | Source status table with failure budgets |
-| `hardstop sources test <id>` | Test a single source |
-| `hardstop export alerts --format csv` | Export alert data |
-| `hardstop demo --mode pinned` | Deterministic demo run for verification |
+| `hardstop sources list` | List configured sources |
+| `hardstop sources health` | Display source health table |
+| `hardstop sources test <id>` | Test a single source by fetching |
+| `hardstop incidents replay <id> [--strict] [--format json\|text]` | Replay an incident from artifacts |
+| `hardstop export brief` | Export brief data |
+| `hardstop export alerts [--tier {global,regional,local}] [--classification {0,1,2}] --format csv` | Export alerts data |
+| `hardstop export sources` | Export sources health data |
+| `hardstop demo --mode pinned` | Run the demo pipeline |
 
 Exit codes: **0** = healthy, **1** = warning, **2** = broken. Use `--strict` to fail on warnings.
 
@@ -65,7 +73,7 @@ See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference.
 - **Local-first**: SQLite storage, no cloud dependencies
 - **Deterministic**: strict mode guarantees identical inputs produce identical outputs
 - **Self-evaluating**: exit codes and health checks surface problems, no silent failures
-- **Auditable**: run records, config fingerprints, and artifact hashes for every execution
+- **Auditable**: run records, config fingerprints, and artifact hashes for every execution. Alerts fail closed: an alert is not committed unless its incident evidence is written and hash-verified (PRs [#109](https://github.com/WhatsYourWhy/Hardstop/pull/109), [#114](https://github.com/WhatsYourWhy/Hardstop/pull/114)).
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the runtime specification.
 
@@ -73,22 +81,26 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the runtime specification.
 
 ```
 src/hardstop/
-├── retrieval/       # Source adapters and fetching
-├── suppression/     # Noise filtering engine
-├── parsing/         # Event normalization and entity extraction
 ├── alerts/          # Alert generation, correlation, and impact scoring
-├── database/        # SQLite storage, schema, and migrations
-├── output/          # Brief generation and incident evidence
 ├── api/             # Query surface for alerts, briefs, and sources
-├── ops/             # Run records, status evaluation, artifacts
-├── runners/         # Executable workflows (demo, ingest, network load)
+├── cli/             # CLI entrypoint and command handlers
 ├── config/          # Configuration loading and defaults
-└── cli.py           # CLI entrypoint
+├── database/        # SQLite storage, schema, and migrations
+├── ingestion/       # Local file / CSV network data ingestion
+├── ops/             # Run records, status evaluation, artifacts
+├── output/          # Brief generation and incident evidence
+├── parsing/         # Event normalization and entity extraction
+├── retrieval/       # Source adapters and fetching
+├── runners/         # Executable workflows (demo, ingest, network load)
+├── suppression/     # Noise filtering engine
+└── utils/           # Shared IDs, logging, and time helpers
 ```
 
 ## Requirements
 
 - Python 3.10+ for the application and tests; Python 3.11+ for security tooling
+- CI runs the test suite on Python 3.10 and 3.12 on Linux and Windows
+- `requirements.lock.txt` is a hashed lockfile generated on Python 3.12 with the `dev` and `security` extras
 - SQLite (bundled with Python)
 
 ## Tests
@@ -97,7 +109,7 @@ src/hardstop/
 pytest
 ```
 
-30 test files covering determinism regression, adapter parsing, alert quality validation, source health, suppression, and end-to-end pipeline verification.
+Tests cover determinism regression, adapter parsing, alert quality validation, source health, suppression, and end-to-end pipeline verification.
 
 ## Documentation
 
