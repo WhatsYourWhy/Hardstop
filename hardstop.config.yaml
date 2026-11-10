@@ -13,7 +13,9 @@ demo:
   facilities_csv: "tests/fixtures/facilities.csv"
   lanes_csv: "tests/fixtures/lanes.csv"
   shipments_csv: "tests/fixtures/shipments_snapshot.csv"
-  event_json: "tests/fixtures/event_spill.json"
+  # Default story: synthetic winter storm near fictional supplier PLANT-01 (Avon, Indiana).
+  # Spill golden fixtures remain at tests/fixtures/event_spill.json for regression tests.
+  event_json: "tests/fixtures/event_weather.json"
 
 alert_quality:
   # Minimum facility confidence for each classification level

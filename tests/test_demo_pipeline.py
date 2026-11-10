@@ -80,6 +80,69 @@ def test_pinned_demo_output_is_stable(tmp_path, session):
     assert payload["artifact_hash"] == expected_hash
 
 
+def test_pinned_weather_demo_links_supplier_and_preserves_evidence(tmp_path, session):
+    """End-to-end demo story: synthetic weather near fictional Avon supplier."""
+    facilities = Path("tests/fixtures/facilities.csv")
+    lanes = Path("tests/fixtures/lanes.csv")
+    shipments = Path("tests/fixtures/shipments_snapshot.csv")
+    ingest_all_csvs(facilities, lanes, shipments, session)
+
+    event_path = Path("tests/fixtures/event_weather.json")
+    raw = json.loads(event_path.read_text(encoding="utf-8"))
+    assert "[SYNTHETIC]" in raw["title"]
+    raw["event_id"] = "EVT-DEMO-0001"
+
+    event = normalize_event(raw)
+    event = link_event_to_network(event, session=session)
+
+    assert event["event_type"] == "WEATHER"
+    assert event["facilities"] == ["PLANT-01"]
+    assert event["link_provenance"].get("facility") == "CITY_STATE"
+    assert any("Avon, IN" in note for note in event["linking_notes"])
+
+    pinned_dt = DEFAULT_PINNED_TIMESTAMP
+    pinned_iso = pinned_dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    event["event_time_utc"] = pinned_iso
+    event["published_at_utc"] = pinned_iso
+    event["scoring_now"] = pinned_dt
+
+    determinism_context = {
+        "seed": DEFAULT_PINNED_SEED,
+        "timestamp_utc": pinned_iso,
+        "run_id": DEFAULT_PINNED_RUN_ID,
+    }
+
+    incidents_dir = tmp_path / "incidents"
+    with deterministic_id_context(now=pinned_dt, seed=DEFAULT_PINNED_SEED):
+        alert = build_basic_alert(
+            event,
+            session=session,
+            determinism_mode="pinned",
+            determinism_context=determinism_context,
+            incident_dest_dir=incidents_dir,
+        )
+
+    assert alert.alert_id == "ALERT-20251229-d31a370b"
+    assert alert.risk_type == "WEATHER"
+    assert alert.scope.facilities == ["PLANT-01"]
+    assert "LANE-001" in alert.scope.lanes
+    assert alert.evidence.diagnostics.impact_score == 4
+    breakdown = alert.evidence.diagnostics.impact_score_breakdown
+    assert any("PLANT-01" in item for item in breakdown)
+    assert any("Priority shipments" in item for item in breakdown)
+    assert any("CITY_STATE" in note or "Avon, IN" in note for note in alert.evidence.linking_notes)
+
+    incident_summary = alert.evidence.incident_evidence
+    artifact_path = Path(incident_summary.artifact_path)
+    assert artifact_path.exists()
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert payload["determinism_mode"] == "pinned"
+    assert payload["inputs"]["event"]["event_type"] == "WEATHER"
+    expected_hash = "e7a61c0bc07242aec3db14d4ba998d688207925d0a97dfb27a37508d351ecd3e"
+    assert incident_summary.artifact_hash == expected_hash
+    assert payload["artifact_hash"] == expected_hash
+
+
 def test_pinned_demo_replay_is_identical(tmp_path, session):
     """Test that running the pinned pipeline twice produces identical outputs."""
     facilities = Path("tests/fixtures/facilities.csv")

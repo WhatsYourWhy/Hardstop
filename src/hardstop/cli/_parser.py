@@ -44,6 +44,10 @@ def main() -> None:
         dest="run_id",
         help="Override pinned run identifier. Only used when --mode pinned.",
     )
+    demo_parser.add_argument(
+        "--event",
+        help="Path to a synthetic event JSON fixture (overrides demo.event_json in config).",
+    )
     demo_parser.set_defaults(func=cmd_demo)
 
     # incidents commands

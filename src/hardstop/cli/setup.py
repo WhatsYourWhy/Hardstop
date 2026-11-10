@@ -34,6 +34,7 @@ def cmd_demo(args: argparse.Namespace) -> None:
         pinned_seed=getattr(args, "seed", None),
         pinned_timestamp=getattr(args, "timestamp", None),
         pinned_run_id=getattr(args, "run_id", None),
+        event_json=getattr(args, "event", None),
     )
 
 

@@ -80,6 +80,7 @@ def main(
     pinned_seed: Optional[str] = None,
     pinned_timestamp: Optional[str] = None,
     pinned_run_id: Optional[str] = None,
+    event_json: Optional[str] = None,
 ) -> None:
     """
     Demo pipeline supporting live and pinned determinism modes.
@@ -91,7 +92,7 @@ def main(
         timestamp=_parse_timestamp(pinned_timestamp) if pinned_timestamp else None,
     )
 
-    event, alert = _run_demo(determinism)
+    event, alert = _run_demo(determinism, event_json=event_json)
 
     logger.info("Built alert (mode=%s):", determinism.mode)
     print(alert.model_dump_json(indent=2))
@@ -133,10 +134,13 @@ def main(
         )
 
 
-def _run_demo(determinism: DemoDeterminismConfig):
+def _run_demo(determinism: DemoDeterminismConfig, event_json: Optional[str] = None):
     config = load_config()
     demo_config = config.get("demo", {})
-    event_path = Path(demo_config.get("event_json", "tests/fixtures/event_spill.json"))
+    event_path = Path(
+        event_json
+        or demo_config.get("event_json", "tests/fixtures/event_weather.json")
+    )
     if not event_path.exists():
         raise FileNotFoundError(f"Fixture not found: {event_path}")
 
@@ -186,6 +190,11 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="run_id",
         help="Override pinned run identifier. Only used when --mode pinned.",
     )
+    parser.add_argument(
+        "--event",
+        dest="event_json",
+        help="Path to a synthetic event JSON fixture (overrides demo.event_json in config).",
+    )
     return parser
 
 
@@ -197,6 +206,7 @@ def cli() -> None:
         pinned_seed=args.seed,
         pinned_timestamp=args.timestamp,
         pinned_run_id=args.run_id,
+        event_json=args.event_json,
     )
 
 
