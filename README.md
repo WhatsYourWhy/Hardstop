@@ -26,9 +26,12 @@ pip install --no-deps -e .
 hardstop init              # copy example configs
 hardstop doctor            # verify environment
 hardstop ingest            # load network data (facilities, lanes, shipments)
+hardstop demo --mode pinned  # synthetic weather → supplier link → scored alert + evidence
 hardstop run --since 24h   # fetch + process events
 hardstop brief --today --since 24h
 ```
+
+New here? Start with the short [demo walkthrough](docs/DEMO.md) (fictional supplier near a synthetic winter storm).
 
 ## How It Works
 
@@ -56,7 +59,7 @@ hardstop brief --today --since 24h
 | `hardstop export brief` | Export brief data |
 | `hardstop export alerts [--tier {global,regional,local}] [--classification {0,1,2}] --format csv` | Export alerts data |
 | `hardstop export sources` | Export sources health data |
-| `hardstop demo --mode pinned` | Run the demo pipeline |
+| `hardstop demo --mode pinned` | Run the pinned demo (synthetic weather → supplier link → alert + evidence); see [docs/DEMO.md](docs/DEMO.md) |
 
 Exit codes: **0** = healthy, **1** = warning, **2** = broken. Use `--strict` to fail on warnings.
 
@@ -113,6 +116,7 @@ Tests cover determinism regression, adapter parsing, alert quality validation, s
 
 ## Documentation
 
+- [Demo walkthrough](docs/DEMO.md) — synthetic weather event linked to a fictional supplier
 - [Architecture](docs/ARCHITECTURE.md) — runtime spec, operator taxonomy, determinism contract
 - [Roadmap](docs/ROADMAP.md) — what is next, what is deferred, and why
 - [Configuration](docs/CONFIGURATION.md) — sources, suppression, quality thresholds

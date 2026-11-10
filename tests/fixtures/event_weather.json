@@ -1,0 +1,8 @@
+{
+  "type": "NEWS",
+  "title": "[SYNTHETIC] Winter storm warning near Avon, Indiana supplier facility",
+  "body": "[SYNTHETIC DEMO DATA — fictional only] A winter storm warning covers Hendricks County, including Avon, Indiana. Heavy snow and ice may slow outbound trucking from a fictional chemical supplier plant in the area. No real weather bureau, company, or person is represented.",
+  "source": "SyntheticWeatherFeed",
+  "event_type": "WEATHER",
+  "severity_guess": 2
+}
