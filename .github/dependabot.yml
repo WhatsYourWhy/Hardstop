@@ -1,0 +1,30 @@
+# Dependabot version updates for Hardstop.
+#
+# Dependencies are declared in pyproject.toml; the hashed install path used by
+# the locked-environment CI job is requirements.lock.txt (pip-compile from
+# pyproject.toml with --extra=dev --extra=security --generate-hashes).
+# Reviewers should confirm that lockfile stays consistent with any pyproject
+# bumps before merging Dependabot PRs.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      pip-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

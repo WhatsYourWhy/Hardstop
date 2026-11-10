@@ -57,9 +57,9 @@ New here? Start with the short [demo walkthrough](docs/DEMO.md) (fictional suppl
 | `hardstop sources test <id>` | Test a single source by fetching |
 | `hardstop incidents replay <id> [--strict] [--format json\|text]` | Replay an incident from artifacts |
 | `hardstop export brief` | Export brief data |
-| `hardstop export alerts [--tier {global,regional,local}] [--classification {0,1,2}] --format csv` | Export alerts data |
+| `hardstop export alerts [--tier {global,regional,local}] [--classification {0,1,2}] [--format json\|csv]` | Export alerts data (default: json) |
 | `hardstop export sources` | Export sources health data |
-| `hardstop demo --mode pinned` | Run the pinned demo (synthetic weather → supplier link → alert + evidence); see [docs/DEMO.md](docs/DEMO.md) |
+| `hardstop demo --mode pinned [--event <path>]` | Run the pinned demo (synthetic weather → supplier link → alert + evidence); optional `--event` overrides the fixture path — see [docs/DEMO.md](docs/DEMO.md) |
 
 Exit codes: **0** = healthy, **1** = warning, **2** = broken. Use `--strict` to fail on warnings.
 
