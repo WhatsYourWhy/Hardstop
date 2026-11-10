@@ -25,14 +25,18 @@ hardstop demo --mode pinned
 Pinned mode freezes time and IDs so the output is reproducible:
 
 - timestamp: `2025-12-29T17:00:00Z`
-- seed: `demo-pinned-seed.v1`
+- base seed: `demo-pinned-seed.v1` (effective seed folds in the fixture name,
+  e.g. `demo-pinned-seed.v1|event_weather`)
 - run id: `demo-golden-run.v1`
+- event id: `EVT-DEMO-event_weather` (derived from the fixture filename)
 
 Optional: point at the weather fixture explicitly (same default in
-`hardstop.config.yaml`):
+`hardstop.config.yaml`), or try the spill fixture on the same database — each
+fixture gets its own pinned alert ID:
 
 ```bash
 hardstop demo --mode pinned --event tests/fixtures/event_weather.json
+hardstop demo --mode pinned --event tests/fixtures/event_spill.json
 ```
 
 ## What to look for
@@ -53,10 +57,11 @@ Trimmed from `hardstop demo --mode pinned` stdout (full JSON is longer):
 
 ```json
 {
-  "alert_id": "ALERT-20251229-d31a370b",
+  "alert_id": "ALERT-20251229-164f34d3",
   "risk_type": "WEATHER",
   "classification": 2,
   "summary": "[SYNTHETIC] Winter storm warning near Avon, Indiana supplier facility",
+  "root_event_id": "EVT-DEMO-event_weather",
   "scope": {
     "facilities": ["PLANT-01"],
     "lanes": ["LANE-001", "LANE-002", "LANE-003"],
@@ -88,14 +93,15 @@ Trimmed from `hardstop demo --mode pinned` stdout (full JSON is longer):
       "Created new correlated alert via key=WEATHER|PLANT-01|LANE-001"
     ],
     "incident_evidence": {
-      "artifact_hash": "e7a61c0bc07242aec3db14d4ba998d688207925d0a97dfb27a37508d351ecd3e",
-      "artifact_path": "output/incidents/ALERT-20251229-d31a370b__EVT-DEMO-0001__WEATHER_PLANT-01_LANE-001.json"
+      "artifact_hash": "1690e85ef3cc1b7644e718ed8ccc2e59c9178e9f35d71c70576185c9542a2711",
+      "artifact_path": "output/incidents/ALERT-20251229-164f34d3__EVT-DEMO-event_weather__WEATHER_PLANT-01_LANE-001.json"
     }
   }
 }
 ```
 
-Log lines from the same run also print the pinned context and linking notes.
+Log lines from the same run also print the pinned context
+(`seed=demo-pinned-seed.v1|event_weather`) and linking notes.
 
 ## Fixtures used
 

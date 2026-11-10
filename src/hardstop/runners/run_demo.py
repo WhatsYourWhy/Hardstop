@@ -22,12 +22,33 @@ DEFAULT_PINNED_SEED = "demo-pinned-seed.v1"
 DEFAULT_PINNED_RUN_ID = "demo-golden-run.v1"
 
 
+def demo_fixture_key(event_path: Path | str) -> str:
+    """Stable identity for a demo event fixture (filename stem)."""
+    return Path(event_path).stem
+
+
+def demo_event_id_for_path(event_path: Path | str) -> str:
+    """Pinned/live demo event_id derived from the selected fixture."""
+    return f"EVT-DEMO-{demo_fixture_key(event_path)}"
+
+
+def demo_pinned_seed_for_path(base_seed: str, event_path: Path | str) -> str:
+    """
+    Fold fixture identity into the pinned UUID seed.
+
+    Different fixtures must produce different alert IDs when written to the same
+    database; the same fixture must stay deterministic across runs.
+    """
+    return f"{base_seed}|{demo_fixture_key(event_path)}"
+
+
 @dataclass
 class DemoDeterminismConfig:
     mode: Literal["live", "pinned"] = "live"
     timestamp: Optional[datetime] = None
     seed: Optional[str] = None
     run_id: Optional[str] = None
+    fixture_key: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.mode == "pinned":
@@ -39,6 +60,17 @@ class DemoDeterminismConfig:
     def is_pinned(self) -> bool:
         return self.mode == "pinned"
 
+    def bind_event_fixture(self, event_path: Path | str) -> None:
+        """Record which event fixture is running (used to diversify pinned IDs)."""
+        self.fixture_key = demo_fixture_key(event_path)
+
+    @property
+    def effective_seed(self) -> str:
+        base = self.seed or DEFAULT_PINNED_SEED
+        if self.is_pinned and self.fixture_key:
+            return f"{base}|{self.fixture_key}"
+        return base
+
     def timestamp_iso(self) -> Optional[str]:
         if not self.timestamp:
             return None
@@ -48,7 +80,7 @@ class DemoDeterminismConfig:
         if not self.is_pinned:
             return None
         return {
-            "seed": self.seed or "",
+            "seed": self.effective_seed,
             "timestamp_utc": self.timestamp_iso() or "",
             "run_id": self.run_id or "",
         }
@@ -56,7 +88,7 @@ class DemoDeterminismConfig:
     def id_context(self):
         if not self.is_pinned:
             return nullcontext()
-        return deterministic_id_context(now=self.timestamp, seed=self.seed or DEFAULT_PINNED_SEED)
+        return deterministic_id_context(now=self.timestamp, seed=self.effective_seed)
 
 
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
@@ -134,7 +166,12 @@ def main(
         )
 
 
-def _run_demo(determinism: DemoDeterminismConfig, event_json: Optional[str] = None):
+def _run_demo(
+    determinism: DemoDeterminismConfig,
+    event_json: Optional[str] = None,
+    *,
+    incident_dest_dir: Optional[Path] = None,
+):
     config = load_config()
     demo_config = config.get("demo", {})
     event_path = Path(
@@ -145,7 +182,10 @@ def _run_demo(determinism: DemoDeterminismConfig, event_json: Optional[str] = No
         raise FileNotFoundError(f"Fixture not found: {event_path}")
 
     raw = json.loads(event_path.read_text(encoding="utf-8"))
-    raw["event_id"] = "EVT-DEMO-0001"
+    raw["event_id"] = demo_event_id_for_path(event_path)
+    # Fold fixture identity into the pinned seed so two fixtures on one DB do not
+    # collide on Alert.alert_id when correlation keys differ.
+    determinism.bind_event_fixture(event_path)
 
     event = normalize_event(raw)
     if determinism.is_pinned:
@@ -157,6 +197,10 @@ def _run_demo(determinism: DemoDeterminismConfig, event_json: Optional[str] = No
     sqlite_path = config.get("storage", {}).get("sqlite_path", "hardstop.db")
     ensure_alert_correlation_columns(sqlite_path)
 
+    alert_kwargs = {}
+    if incident_dest_dir is not None:
+        alert_kwargs["incident_dest_dir"] = incident_dest_dir
+
     with session_context(sqlite_path) as session:
         event = link_event_to_network(event, session=session)
         with determinism.id_context():
@@ -165,6 +209,7 @@ def _run_demo(determinism: DemoDeterminismConfig, event_json: Optional[str] = No
                 session=session,
                 determinism_mode=determinism.mode,
                 determinism_context=determinism.context_payload(),
+                **alert_kwargs,
             )
     return event, alert
 
