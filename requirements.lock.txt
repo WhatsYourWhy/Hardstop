@@ -1106,9 +1106,9 @@ urllib3==2.8.0 \
     --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
     --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63
     # via requests
-us==3.2.0 \
-    --hash=sha256:571714ad6d473c72bbd2058a53404cdf4ecc0129e4f19adfcbeb4e2d7e3dc3e7 \
-    --hash=sha256:cb223e85393dcc5171ead0dd212badc47f9667b23700fea3e7ea5f310d545338
+us==4.0.0 \
+    --hash=sha256:3e7dd072efc65ecc6f765ced861f49fe7635067e760bbe2a527f16e5477011c0 \
+    --hash=sha256:7dd4c4e603c9427b72d7e07be700d8f643bdcd7f5195a12bc639f1b7e38e7496
     # via hardstop-agent (pyproject.toml)
 wheel==0.48.0 \
     --hash=sha256:3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab \
